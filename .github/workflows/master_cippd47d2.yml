@@ -23,13 +23,6 @@ jobs:
       - name: 'Checkout GitHub Action'
         uses: actions/checkout@v4
       
-      - name: Login to Azure
-        uses: azure/login@v2
-        with:
-          client-id: ${{ secrets.AZUREAPPSERVICE_CLIENTID_E02B677F722B4908AB5726716A159370 }}
-          tenant-id: ${{ secrets.AZUREAPPSERVICE_TENANTID_D9393E6FA1C445C9A3A7463B4F8C1FB5 }}
-          subscription-id: ${{ secrets.AZUREAPPSERVICE_SUBSCRIPTIONID_22F60993B58A45F7BBD77BBC2759CFB5 }}
-
       - name: 'Run Azure Functions Action'
         uses: Azure/functions-action@v1
         id: fa
@@ -37,4 +30,5 @@ jobs:
           app-name: 'cippwemix'
           slot-name: 'Production'
           package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
+          publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
           
