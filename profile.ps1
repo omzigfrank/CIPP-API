@@ -48,7 +48,8 @@ if ($hasAppInsights) {
 # Import core modules
 $SwCoreModules = [System.Diagnostics.Stopwatch]::StartNew()
 $ModulesPath = Join-Path $env:CIPPRootPath 'Modules'
-$Modules = @('CIPPCore', 'CippExtensions', 'AzBobbyTables')
+# ŌMZIG overlay: load Modules/Omzig with the core set (see Modules/Omzig/README.md).
+$Modules = @('CIPPCore', 'CippExtensions', 'AzBobbyTables', 'Omzig')
 foreach ($Module in $Modules) {
     $SwModule = [System.Diagnostics.Stopwatch]::StartNew()
     try {
