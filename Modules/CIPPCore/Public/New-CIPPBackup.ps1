@@ -13,7 +13,7 @@ function New-CIPPBackup {
         $ScheduledBackupValues,
         $APIName = 'CIPP Backup',
         $Headers,
-        [Parameter(Mandatory = $false)] [string] $ConnectionString = $env:AzureWebJobsStorage
+        [Parameter(Mandatory = $false)] [string] $ConnectionString = $(Get-CIPPStorageConnectionString)
     )
 
     # Validate that TenantFilter is provided for Scheduled backups
@@ -201,4 +201,3 @@ function New-CIPPBackup {
         BackupState = $State
     }
 }
-

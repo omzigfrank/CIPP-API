@@ -17,7 +17,7 @@ function Remove-CIPPCache {
 
     if ($TenantsOnly -eq $false) {
         'Clearing all cached table data'
-        $Context = New-AzDataTableContext -ConnectionString $env:AzureWebJobsStorage
+        $Context = New-AzDataTableContext -ConnectionString (Get-CIPPStorageConnectionString)
         $Tables = Get-AzDataTable -Context $Context
         foreach ($Table in $Tables) {
             if ($Table -match '^cache') {

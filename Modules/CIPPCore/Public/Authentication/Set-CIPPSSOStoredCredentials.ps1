@@ -32,7 +32,7 @@ function Set-CIPPSSOStoredCredentials {
         return
     }
 
-    $KV = $env:WEBSITE_DEPLOYMENT_ID
+    $KV = Get-CIPPKeyVaultName
     $VaultName = if ($KV) { ($KV -split '-')[0] } else { $null }
     if (-not $VaultName) { throw 'Cannot determine Key Vault name from WEBSITE_DEPLOYMENT_ID' }
 

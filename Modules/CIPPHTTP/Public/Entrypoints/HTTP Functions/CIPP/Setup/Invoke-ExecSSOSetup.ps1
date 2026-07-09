@@ -193,7 +193,7 @@ function Invoke-ExecSSOSetup {
 
                     # Best-effort: stash TenantID in KV if missing (was previously inline)
                     if (-not ($env:AzureWebJobsStorage -eq 'UseDevelopmentStorage=true' -or $env:NonLocalHostAzurite -eq 'true')) {
-                        $KV = $env:WEBSITE_DEPLOYMENT_ID
+                        $KV = Get-CIPPKeyVaultName
                         $VaultName = if ($KV) { ($KV -split '-')[0] } else { $null }
                         if ($VaultName -and $env:TenantID) {
                             $ExistingTenantId = $null
@@ -513,7 +513,7 @@ function Invoke-ExecSSOSetup {
                         $DevSecret = Get-CIPPAzDataTableEntity @DevSecretsTable -Filter "PartitionKey eq 'SSO' and RowKey eq 'SSO'" -ErrorAction SilentlyContinue
                         $ExistingAppId = $DevSecret.SSOAppId
                     } else {
-                        $KV = $env:WEBSITE_DEPLOYMENT_ID
+                        $KV = Get-CIPPKeyVaultName
                         $VaultName = if ($KV) { ($KV -split '-')[0] } else { $null }
                         if ($VaultName) {
                             try { $ExistingAppId = Get-CippKeyVaultSecret -VaultName $VaultName -Name 'SSOAppId' -AsPlainText -ErrorAction Stop } catch { }

@@ -9,7 +9,7 @@ function Invoke-ExecCreateSAMApp {
     [CmdletBinding()]
     param($Request, $TriggerMetadata)
 
-    $KV = $env:WEBSITE_DEPLOYMENT_ID
+    $KV = Get-CIPPKeyVaultName
 
     try {
         $Token = $Request.body

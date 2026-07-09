@@ -25,7 +25,7 @@ function Get-CIPPAzStorageQueue {
         [string]$Name = '*',
 
         [Parameter(Mandatory = $false)]
-        [string]$ConnectionString = $env:AzureWebJobsStorage,
+        [string]$ConnectionString = $(Get-CIPPStorageConnectionString),
 
         [Parameter(Mandatory = $false)]
         [switch]$NoCount

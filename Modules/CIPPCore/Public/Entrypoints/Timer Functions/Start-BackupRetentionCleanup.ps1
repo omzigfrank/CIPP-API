@@ -8,7 +8,7 @@ function Start-BackupRetentionCleanup {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param(
         [Parameter(Mandatory = $false)]
-        [string]$ConnectionString = $env:AzureWebJobsStorage
+        [string]$ConnectionString = $(Get-CIPPStorageConnectionString)
     )
 
     try {

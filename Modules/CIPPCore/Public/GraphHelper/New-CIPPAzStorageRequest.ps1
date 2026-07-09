@@ -68,7 +68,7 @@ function New-CIPPAzStorageRequest {
         [string]$ContentType,
 
         [Parameter(Mandatory = $false)]
-        [string]$ConnectionString = $env:AzureWebJobsStorage,
+        [string]$ConnectionString = $(Get-CIPPStorageConnectionString),
 
         [Parameter(Mandatory = $false)]
         [int]$MaxRetries = 3

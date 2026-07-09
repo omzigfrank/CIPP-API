@@ -23,7 +23,7 @@ function New-CIPPAzServiceSAS {
         # Optional encryption scope (Blob, 2020-12-06+)
         [Parameter(Mandatory = $false)] [string] $EncryptionScope,
         # Optional connection string for endpoint/emulator support
-        [Parameter(Mandatory = $false)] [string] $ConnectionString = $env:AzureWebJobsStorage
+        [Parameter(Mandatory = $false)] [string] $ConnectionString = $(Get-CIPPStorageConnectionString)
     )
 
     # Local helpers: canonicalized resource and signature (standalone)

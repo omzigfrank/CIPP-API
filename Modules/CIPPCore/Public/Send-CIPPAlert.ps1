@@ -127,7 +127,7 @@ function Send-CIPPAlert {
                 return (Get-CIPPAzDataTableEntity @DevSecretsTable -Filter "PartitionKey eq '$SecretName' and RowKey eq '$SecretName'").APIKey
             }
 
-            $KeyVaultName = ($env:WEBSITE_DEPLOYMENT_ID -split '-')[0]
+            $KeyVaultName = Get-CIPPKeyVaultName
             return (Get-CippKeyVaultSecret -VaultName $KeyVaultName -Name $SecretName -AsPlainText)
         }
 
