@@ -16,6 +16,10 @@ permissions:
 
 jobs:
   check-branch:
+    # ŌMZIG overlay: this contribution-policy bot belongs to upstream only.
+    # On the Omzig fork it would close every legitimate PR to master, including
+    # the weekly omzig-upstream-sync PRs.
+    if: github.repository == 'KelvinTegelaar/CIPP-API'
     runs-on: ubuntu-slim
     steps:
       - name: Check and Comment on PR
