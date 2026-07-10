@@ -114,6 +114,19 @@ Describe 'Get-OmzigUpdateRepos' {
             Remove-Item Env:OMZIG_GITHUB_OWNER -ErrorAction SilentlyContinue
         }
     }
+
+    It 'dispatches from the default branch unless OMZIG_UPDATE_WORKFLOW_REF overrides it' {
+        (Get-OmzigUpdateRepos).Frontend.WorkflowRef | Should -Be 'main'
+        (Get-OmzigUpdateRepos).Api.WorkflowRef | Should -Be 'master'
+        $env:OMZIG_UPDATE_WORKFLOW_REF = 'feature/pre-merge'
+        try {
+            $Repos = Get-OmzigUpdateRepos
+            $Repos.Frontend.WorkflowRef | Should -Be 'feature/pre-merge'
+            $Repos.Api.WorkflowRef | Should -Be 'feature/pre-merge'
+        } finally {
+            Remove-Item Env:OMZIG_UPDATE_WORKFLOW_REF -ErrorAction SilentlyContinue
+        }
+    }
 }
 
 Describe 'Get-OmzigUpdateChannels' {

@@ -36,7 +36,9 @@ function Start-OmzigUpdateInstall {
 
     foreach ($Side in @($Repos.Frontend, $Repos.Api)) {
         $Body = @{
-            ref    = $Side.DefaultBranch
+            # The ref only selects which copy of the workflow file runs; the
+            # workflow itself always checks out and updates its TARGET_BRANCH.
+            ref    = $Side.WorkflowRef
             inputs = @{
                 channel = $Channel
                 mode    = $Mode
