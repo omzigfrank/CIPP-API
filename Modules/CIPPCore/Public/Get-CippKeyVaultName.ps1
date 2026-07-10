@@ -32,6 +32,13 @@ function Get-CippKeyVaultName {
     [OutputType([string])]
     param()
 
+    # ŌMZIG overlay: an explicitly configured vault name always wins. The
+    # Omzig stacks name their vault independently of the site (e.g.
+    # kv-omzig-cipp-dev) and wire it via the KEYVAULT_NAME app setting.
+    if (-not [string]::IsNullOrWhiteSpace($env:KEYVAULT_NAME)) {
+        return $env:KEYVAULT_NAME
+    }
+
     # Primary: the App Service site name IS the vault name (on the main app).
     # Fallback: the full deployment id. Never split on '-' (that is the truncation bug this
     # helper exists to prevent); a dashed vault name must be kept whole.

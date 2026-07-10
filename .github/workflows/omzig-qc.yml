@@ -1,0 +1,38 @@
+# ŌMZIG QC gate (spec §13, passes 1-2 for the overlay module):
+# PSScriptAnalyzer + Pester on Modules/Omzig for every PR that touches it.
+name: Omzig QC
+
+on:
+  pull_request:
+    paths:
+      - 'Modules/Omzig/**'
+      - 'profile.ps1'
+      - '.github/workflows/omzig-qc.yml'
+  push:
+    branches: [main, master]
+    paths:
+      - 'Modules/Omzig/**'
+
+jobs:
+  lint-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: PSScriptAnalyzer (pass 1)
+        shell: pwsh
+        run: |
+          Install-Module PSScriptAnalyzer -Force -Scope CurrentUser
+          $Findings = Invoke-ScriptAnalyzer -Path ./Modules/Omzig -Recurse -Severity Error
+          $Findings | Format-Table RuleName, ScriptName, Line -AutoSize
+          if ($Findings.Count -gt 0) { throw "PSScriptAnalyzer reported $($Findings.Count) error(s)." }
+
+      - name: Pester (pass 2)
+        shell: pwsh
+        run: |
+          Install-Module Pester -Force -Scope CurrentUser -SkipPublisherCheck
+          $Config = New-PesterConfiguration
+          $Config.Run.Path = './Modules/Omzig/Tests'
+          $Config.Run.Exit = $true
+          $Config.Output.Verbosity = 'Detailed'
+          Invoke-Pester -Configuration $Config

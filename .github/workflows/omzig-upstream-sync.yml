@@ -1,0 +1,92 @@
+# ŌMZIG upstream sync (spec §11.4): weekly PR pulling KelvinTegelaar/CIPP-API
+# into the Omzig fork so we never fall off the CIPP release train.
+# Conflicts should only ever surface in the single marked overlay touchpoint
+# (profile.ps1).
+name: Omzig Upstream Sync
+
+on:
+  schedule:
+    - cron: '0 10 * * 1' # Mondays 10:00 UTC (06:00 ET)
+  workflow_dispatch:
+    inputs:
+      strategy:
+        description: 'merge or rebase'
+        required: false
+        default: 'merge'
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+env:
+  UPSTREAM_REPO: KelvinTegelaar/CIPP-API
+  UPSTREAM_BRANCH: master
+  TARGET_BRANCH: main
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ env.TARGET_BRANCH }}
+          fetch-depth: 0
+
+      - name: Configure git
+        run: |
+          git config user.name 'omzig-portal-bot'
+          git config user.email 'hello@omzig.it'
+
+      - name: Fetch upstream
+        run: |
+          git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
+          git fetch upstream "${UPSTREAM_BRANCH}"
+
+      - name: Create sync branch and merge
+        id: merge
+        run: |
+          SYNC_BRANCH="omzig/upstream-sync-$(date -u +%Y-%m-%d)"
+          echo "branch=${SYNC_BRANCH}" >> "$GITHUB_OUTPUT"
+          git checkout -b "${SYNC_BRANCH}"
+          STRATEGY="${{ github.event.inputs.strategy || 'merge' }}"
+          set +e
+          if [ "$STRATEGY" = "rebase" ]; then
+            git rebase "upstream/${UPSTREAM_BRANCH}"
+          else
+            git merge --no-edit "upstream/${UPSTREAM_BRANCH}"
+          fi
+          RESULT=$?
+          set -e
+          if [ $RESULT -ne 0 ]; then
+            echo "conflicted=true" >> "$GITHUB_OUTPUT"
+            git merge --abort 2>/dev/null || git rebase --abort 2>/dev/null || true
+          else
+            echo "conflicted=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Push and open PR
+        if: steps.merge.outputs.conflicted == 'false'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          if git diff --quiet "origin/${TARGET_BRANCH}"; then
+            echo 'Already up to date with upstream — nothing to sync.'
+            exit 0
+          fi
+          git push -u origin "${{ steps.merge.outputs.branch }}"
+          gh pr create \
+            --base "${TARGET_BRANCH}" \
+            --head "${{ steps.merge.outputs.branch }}" \
+            --title "chore: weekly upstream sync from ${UPSTREAM_REPO}" \
+            --body "Automated weekly sync from \`${UPSTREAM_REPO}@${UPSTREAM_BRANCH}\` (spec §11.4). Review the overlay touchpoint (profile.ps1) before merging. Merge requires Frank's approval per Governance Non-Negotiable #5."
+
+      - name: Open conflict issue
+        if: steps.merge.outputs.conflicted == 'true'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh issue create \
+            --title "Upstream sync conflict — $(date -u +%Y-%m-%d)" \
+            --label 'upstream-sync' \
+            --body "The weekly sync from \`${UPSTREAM_REPO}@${UPSTREAM_BRANCH}\` hit merge conflicts and needs a manual resolve. Expected conflict surface: the marked ŌMZIG overlay touchpoints. Run the sync locally, resolve, and open the PR by hand."
