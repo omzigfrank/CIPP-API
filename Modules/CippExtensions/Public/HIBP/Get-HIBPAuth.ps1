@@ -9,7 +9,7 @@ function Get-HIBPAuth {
             $DevSecretsTable = Get-CIPPTable -tablename 'DevSecrets'
             $Secret = (Get-CIPPAzDataTableEntity @DevSecretsTable -Filter "PartitionKey eq 'HIBP' and RowKey eq 'HIBP'").APIKey
         } else {
-            $VaultName = Get-CIPPKeyVaultName
+            $VaultName = Get-CippKeyVaultName
             try {
                 $Secret = Get-CippKeyVaultSecret -VaultName $VaultName -Name 'HIBP' -AsPlainText -ErrorAction Stop
             } catch {

@@ -9,7 +9,7 @@ function Invoke-ExecTokenExchange {
     param($Request, $TriggerMetadata)
 
     # Get the key vault name
-    $KV = Get-CIPPKeyVaultName
+    $KV = Get-CippKeyVaultName
     $APIName = $Request.Params.CIPPEndpoint
 
     try {

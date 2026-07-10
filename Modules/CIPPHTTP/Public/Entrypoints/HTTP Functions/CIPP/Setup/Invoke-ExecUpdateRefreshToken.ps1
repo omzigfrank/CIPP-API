@@ -9,7 +9,7 @@ function Invoke-ExecUpdateRefreshToken {
     [CmdletBinding()]
     param($Request, $TriggerMetadata)
 
-    $KV = Get-CIPPKeyVaultName
+    $KV = Get-CippKeyVaultName
 
     try {
         # Handle refresh token update

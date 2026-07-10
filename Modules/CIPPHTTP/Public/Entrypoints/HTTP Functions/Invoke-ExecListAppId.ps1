@@ -21,7 +21,7 @@ function Invoke-ExecListAppId {
         $env:ApplicationID = $Secret.ApplicationID
         $env:TenantID = $Secret.TenantID
     } else {
-        $keyvaultname = Get-CIPPKeyVaultName
+        $keyvaultname = Get-CippKeyVaultName
         try {
             $env:ApplicationID = (Get-CippKeyVaultSecret -AsPlainText -VaultName $keyvaultname -Name 'ApplicationID')
             $env:TenantID = (Get-CippKeyVaultSecret -AsPlainText -VaultName $keyvaultname -Name 'TenantID')

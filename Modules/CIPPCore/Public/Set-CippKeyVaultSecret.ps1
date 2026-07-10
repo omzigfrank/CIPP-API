@@ -38,9 +38,9 @@ function Set-CippKeyVaultSecret {
     try {
         # Derive vault name if not provided
         if (-not $VaultName) {
-            $VaultName = Get-CIPPKeyVaultName
+            $VaultName = Get-CippKeyVaultName
             if (-not $VaultName) {
-                throw 'VaultName not provided and neither KEYVAULT_NAME nor WEBSITE_DEPLOYMENT_ID is set'
+                throw 'VaultName not provided and could not be derived (WEBSITE_SITE_NAME / WEBSITE_DEPLOYMENT_ID not set)'
             }
         }
 

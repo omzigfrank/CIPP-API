@@ -56,7 +56,7 @@ function Invoke-ExecCombinedSetup {
             $Results.add($notificationResults)
         }
         if ($Request.Body.selectedOption -eq 'Manual') {
-            $KV = Get-CIPPKeyVaultName
+            $KV = Get-CippKeyVaultName
 
             if ($env:AzureWebJobsStorage -eq 'UseDevelopmentStorage=true' -or $env:NonLocalHostAzurite -eq 'true') {
                 $DevSecretsTable = Get-CIPPTable -tablename 'DevSecrets'
