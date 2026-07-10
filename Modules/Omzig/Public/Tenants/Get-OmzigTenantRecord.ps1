@@ -17,8 +17,11 @@
         [Parameter(Mandatory)][string]$TenantId
     )
 
+    # OData filter escaping: single quotes in the key are doubled so a crafted
+    # tenant id cannot alter the filter expression.
+    $SafeTenantId = $TenantId -replace "'", "''"
     $Table = Get-CIPPTable -TableName 'OmzigTenants'
-    $Entity = Get-CIPPAzDataTableEntity @Table -Filter "PartitionKey eq 'Tenant' and RowKey eq '$TenantId'"
+    $Entity = Get-CIPPAzDataTableEntity @Table -Filter "PartitionKey eq 'Tenant' and RowKey eq '$SafeTenantId'"
 
     if (-not $Entity) {
         return New-OmzigTenantDefaults -TenantId $TenantId
