@@ -19,7 +19,7 @@ function Clear-CIPPAzStorageQueue {
         [string]$Name,
 
         [Parameter(Mandatory = $false)]
-        [string]$ConnectionString = $(Get-CIPPStorageConnectionString)
+        [string]$ConnectionString = $env:AzureWebJobsStorage
     )
 
     if ($PSCmdlet.ShouldProcess($Name, 'Clear queue messages')) {

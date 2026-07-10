@@ -8,7 +8,7 @@ function Invoke-ExecDurableFunctions {
     [CmdletBinding(SupportsShouldProcess = $true)]
     param($Request, $TriggerMetadata)
     # Collect info
-    $StorageContext = New-AzStorageContext -ConnectionString (Get-CIPPStorageConnectionString)
+    $StorageContext = New-AzStorageContext -ConnectionString $env:AzureWebJobsStorage
     $FunctionName = $env:WEBSITE_SITE_NAME
 
     # Get orchestrators

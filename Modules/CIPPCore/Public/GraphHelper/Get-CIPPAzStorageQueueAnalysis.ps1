@@ -34,7 +34,7 @@ function Get-CIPPAzStorageQueueAnalysis {
         [int]$NumberOfMessages,
 
         [Parameter(Mandatory = $false, ParameterSetName = 'ByName')]
-        [string]$ConnectionString = $(Get-CIPPStorageConnectionString),
+        [string]$ConnectionString = $env:AzureWebJobsStorage,
 
         [Parameter(Mandatory = $false)]
         [switch]$RawTasks

@@ -17,7 +17,7 @@ function Invoke-ExecCippLogsSas {
 
     try {
         $conn = @{}
-        foreach ($part in ((Get-CIPPStorageConnectionString) -split ';')) {
+        foreach ($part in ($env:AzureWebJobsStorage -split ';')) {
             $p = $part.Trim()
             if ($p -match '^(.+?)=(.+)$') { $conn[$matches[1]] = $matches[2] }
         }

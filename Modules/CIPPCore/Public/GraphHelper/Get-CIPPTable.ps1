@@ -8,7 +8,7 @@ function Get-CIPPTable {
         $tablename = 'CippLogs'
     )
     $ContextParams = @{
-        ConnectionString = Get-CIPPStorageConnectionString
+        ConnectionString = $env:AzureWebJobsStorage
         TableName        = $tablename
     }
     $ContextParams['MaxConnectionsPerServer'] = if ($env:AZBOBBY_MAX_CONNECTIONS_PER_SERVER) { [int]$env:AZBOBBY_MAX_CONNECTIONS_PER_SERVER } else { 30 }

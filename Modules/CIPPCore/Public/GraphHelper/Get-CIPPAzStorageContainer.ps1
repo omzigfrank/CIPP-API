@@ -22,7 +22,7 @@ function Get-CIPPAzStorageContainer {
         [string]$Name = '*',
 
         [Parameter(Mandatory = $false)]
-        [string]$ConnectionString = $(Get-CIPPStorageConnectionString)
+        [string]$ConnectionString = $env:AzureWebJobsStorage
     )
 
     begin {

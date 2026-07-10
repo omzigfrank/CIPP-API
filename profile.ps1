@@ -45,6 +45,14 @@ if ($hasAppInsights) {
     $Timings['AppInsightsSDK'] = $SwAppInsights.Elapsed.TotalMilliseconds
 }
 
+# ŌMZIG overlay: isolated deployments provide CIPP data-plane storage via
+# CIPP_STORAGE_CONNECTION_STRING so platform storage (AzureWebJobsStorage)
+# can stay identity-based. Upstream code reads AzureWebJobsStorage directly,
+# so map it here once instead of patching every call site.
+if ($env:CIPP_STORAGE_CONNECTION_STRING) {
+    $env:AzureWebJobsStorage = $env:CIPP_STORAGE_CONNECTION_STRING
+}
+
 # Import core modules
 $SwCoreModules = [System.Diagnostics.Stopwatch]::StartNew()
 $ModulesPath = Join-Path $env:CIPPRootPath 'Modules'

@@ -1,4 +1,4 @@
-function Set-CIPPSSOStoredCredentials {
+﻿function Set-CIPPSSOStoredCredentials {
     <#
     .SYNOPSIS
         Persists CIPP-SSO credentials to Key Vault (or the DevSecrets table in dev mode).
@@ -32,8 +32,7 @@ function Set-CIPPSSOStoredCredentials {
         return
     }
 
-    $KV = Get-CIPPKeyVaultName
-    $VaultName = if ($KV) { ($KV -split '-')[0] } else { $null }
+    $VaultName = Get-CIPPKeyVaultName
     if (-not $VaultName) { throw 'Cannot determine Key Vault name from WEBSITE_DEPLOYMENT_ID' }
 
     if ($AppId) {

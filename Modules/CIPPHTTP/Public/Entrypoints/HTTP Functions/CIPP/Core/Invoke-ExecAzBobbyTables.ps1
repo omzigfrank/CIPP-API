@@ -33,9 +33,9 @@ function Invoke-ExecAzBobbyTables {
 
     if ($Function -in $AllowList) {
         if ($Function -eq 'Get-AzDataTable') {
-            $Context = New-AzDataTableContext -ConnectionString (Get-CIPPStorageConnectionString)
+            $Context = New-AzDataTableContext -ConnectionString $env:AzureWebJobsStorage
         } else {
-            $Context = New-AzDataTableContext -ConnectionString (Get-CIPPStorageConnectionString) -TableName $Request.Body.TableName
+            $Context = New-AzDataTableContext -ConnectionString $env:AzureWebJobsStorage -TableName $Request.Body.TableName
         }
         try {
             $Results = & $Function -Context $Context @Params

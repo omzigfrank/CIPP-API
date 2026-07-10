@@ -19,7 +19,7 @@ function Remove-CIPPAzStorageContainer {
         [string]$Name,
 
         [Parameter(Mandatory = $false)]
-        [string]$ConnectionString = $(Get-CIPPStorageConnectionString)
+        [string]$ConnectionString = $env:AzureWebJobsStorage
     )
 
     if ($PSCmdlet.ShouldProcess($Name, 'Remove blob container')) {

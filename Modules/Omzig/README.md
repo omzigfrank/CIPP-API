@@ -2,8 +2,18 @@
 
 All Omzig-specific backend logic lives in this module, per the overlay pattern
 in the Omzig Custom CIPP Build spec (§11.4): never patch upstream CIPP modules.
-The only upstream file intentionally patched is `profile.ps1` (adds `Omzig` to
-the core module import list — marked with an `ŌMZIG overlay` comment).
+Upstream touchpoints are carefully scoped:
+
+- `profile.ps1` carries two marked ŌMZIG overlay patches: (1) adds `Omzig` to the
+  core module import list; (2) an environment shim that maps
+  `CIPP_STORAGE_CONNECTION_STRING` onto `AzureWebJobsStorage` at startup so
+  isolated deployments keep platform storage identity-based while upstream code
+  reads `AzureWebJobsStorage` unchanged.
+- A small, concentrated set of upstream CIPPCore/CippExtensions files is patched
+  to derive the Key Vault name through the new `Get-CIPPKeyVaultName` helper
+  (which prefers the `KEYVAULT_NAME` env var and falls back to upstream's
+  `WEBSITE_DEPLOYMENT_ID` derivation). These are the auth/SSO/SAM-setup and
+  secret-CRUD files only; pure storage call sites are NOT patched.
 
 ## Layout
 

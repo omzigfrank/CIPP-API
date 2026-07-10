@@ -1,4 +1,4 @@
-function Update-CIPPSSORedirectUri {
+﻿function Update-CIPPSSORedirectUri {
     <#
     .SYNOPSIS
     Ensures the CIPP-SSO app registration includes redirect URIs for all bound hostnames
@@ -32,8 +32,7 @@ function Update-CIPPSSORedirectUri {
             $SSOMultiTenant = $Secret.SSOMultiTenant -eq 'True'
         } catch { }
     } else {
-        $KV = Get-CIPPKeyVaultName
-        $VaultName = if ($KV) { ($KV -split '-')[0] } else { $null }
+        $VaultName = Get-CIPPKeyVaultName
         if ($VaultName) {
             try {
                 $SSOAppId = Get-CippKeyVaultSecret -VaultName $VaultName -Name 'SSOAppId' -AsPlainText -ErrorAction Stop
