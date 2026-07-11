@@ -282,8 +282,21 @@ Describe 'Start-OmzigUpdateInstall' {
         ($Dispatches | Where-Object { $_.Path -match 'omzigfrank/CIPP/' })[0].Body.ref | Should -Be 'main'
         ($Dispatches | Where-Object { $_.Path -match 'omzigfrank/CIPP-API/' })[0].Body.ref | Should -Be 'master'
         $Dispatches[0].Body.inputs.channel | Should -Be 'dev'
-        $Dispatches[0].Body.inputs.mode | Should -Be 'install'
         $Result.Dispatched.Count | Should -Be 2
+    }
+
+    It 'coerces dev/prerelease installs to PR mode (audit #1 governance)' {
+        $script:GitHubEnabled = $true
+        Start-OmzigUpdateInstall -Channel 'dev' -Mode 'install' | Out-Null
+        ($script:GitHubCalls | Where-Object { $_.Path -match 'dispatches' })[0].Body.inputs.mode | Should -Be 'pr'
+        $script:GitHubCalls.Clear()
+        (Start-OmzigUpdateInstall -Channel 'prerelease' -Mode 'install').Mode | Should -Be 'pr'
+    }
+
+    It 'leaves a stable install as direct install' {
+        $script:GitHubEnabled = $true
+        (Start-OmzigUpdateInstall -Channel 'stable' -Mode 'install').Mode | Should -Be 'install'
+        ($script:GitHubCalls | Where-Object { $_.Path -match 'dispatches' })[0].Body.inputs.mode | Should -Be 'install'
     }
 
     It 'passes PR mode through to the workflow inputs' {

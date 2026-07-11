@@ -32,6 +32,13 @@ function Set-OmzigUpdateSettings {
         [Parameter(Mandatory = $true)][ValidateSet('install', 'pr')][string]$Mode
     )
 
+    # ŌMZIG audit #1 (governance): scheduled prerelease/dev updates can never
+    # install directly — they are always routed through a review PR. Coerce so
+    # the mirrored repo variable the scheduled workflow reads is honest.
+    if ($Channel -ne 'stable' -and $Mode -eq 'install') {
+        $Mode = 'pr'
+    }
+
     $Table = Get-CIPPTable -TableName OmzigUpdateSettings
     Add-CIPPAzDataTableEntity @Table -Entity @{
         PartitionKey = 'Omzig'
