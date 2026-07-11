@@ -13,5 +13,6 @@
     )
 
     $State = if ($Resolved) { 'resolved' } else { 'open' }
-    (Invoke-OmzigDattoRmmRequest -Endpoint "site/$SiteUid/alerts/$State").alerts
+    # Audit #13: URL-encode the caller-influenced site segment (defense in depth).
+    (Invoke-OmzigDattoRmmRequest -Endpoint "site/$([uri]::EscapeDataString($SiteUid))/alerts/$State").alerts
 }

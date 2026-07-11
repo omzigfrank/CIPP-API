@@ -206,4 +206,31 @@ Describe 'Test-OmzigTenantSettings (§14 validation, §7.1 settings drawer)' {
         $Result = Test-OmzigTenantSettings -Settings @{ omzigTier = 'gold'; vertical = 'finance' }
         $Result.Errors.Count | Should -Be 2
     }
+
+    It 'accepts a numeric psa.companyId and a GUID rmm.siteId (audit #13)' {
+        $Result = Test-OmzigTenantSettings -Settings @{
+            psa = @{ companyId = 12345 }
+            rmm = @{ siteId = '11111111-1111-1111-1111-111111111111' }
+            baa = $true
+        }
+        $Result.IsValid | Should -BeTrue
+    }
+
+    It 'rejects a non-numeric psa.companyId (path-injection guard)' {
+        $Result = Test-OmzigTenantSettings -Settings @{ psa = @{ companyId = '1/../secrets' } }
+        $Result.IsValid | Should -BeFalse
+        ($Result.Errors -join ' ') | Should -BeLike '*companyId*numeric*'
+    }
+
+    It 'rejects a non-GUID rmm.siteId (path-injection guard)' {
+        $Result = Test-OmzigTenantSettings -Settings @{ rmm = @{ siteId = 'abc/devices?evil=1' } }
+        $Result.IsValid | Should -BeFalse
+        ($Result.Errors -join ' ') | Should -BeLike '*siteId*GUID*'
+    }
+
+    It 'rejects a non-boolean baa (audit #13 — protect the HIPAA default)' {
+        $Result = Test-OmzigTenantSettings -Settings @{ baa = 'nope' }
+        $Result.IsValid | Should -BeFalse
+        ($Result.Errors -join ' ') | Should -BeLike '*baa must be a boolean*'
+    }
 }

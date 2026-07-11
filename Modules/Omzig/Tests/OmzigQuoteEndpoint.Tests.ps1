@@ -50,10 +50,23 @@ BeforeAll {
 }
 
 Describe 'Test-OmzigQuoteRequest (§3 quote request validation)' {
-    It 'accepts a valid minimal payload (productId + price only)' {
-        $Result = Test-OmzigQuoteRequest -Body @{ productId = 'aira'; price = 4000 }
+    It 'accepts a valid payload with zero hours' {
+        $Result = Test-OmzigQuoteRequest -Body @{ productId = 'aira'; price = 4000; techHours = 0; vcioHours = 0 }
         $Result.IsValid | Should -BeTrue
         $Result.Errors | Should -BeNullOrEmpty
+    }
+
+    It 'rejects a payload missing techHours/vcioHours (audit #9 — no fake 100% margin)' {
+        $Result = Test-OmzigQuoteRequest -Body @{ productId = 'aira'; price = 4000 }
+        $Result.IsValid | Should -BeFalse
+        ($Result.Errors -join ' ') | Should -BeLike '*techHours is required*'
+        ($Result.Errors -join ' ') | Should -BeLike '*vcioHours is required*'
+    }
+
+    It 'rejects negative techHours/vcioHours (audit #9 — no inflated margin)' {
+        $Neg = Test-OmzigQuoteRequest -Body @{ productId = 'aira'; price = 4000; techHours = -5; vcioHours = 0 }
+        $Neg.IsValid | Should -BeFalse
+        ($Neg.Errors -join ' ') | Should -BeLike '*techHours must be zero or positive*'
     }
 
     It 'accepts a valid full payload with all optional fields' {
@@ -104,20 +117,20 @@ Describe 'Test-OmzigQuoteRequest (§3 quote request validation)' {
     }
 
     It 'reports both errors when productId and price are both invalid' {
-        $Result = Test-OmzigQuoteRequest -Body @{ productId = 'widgets'; price = -1 }
+        $Result = Test-OmzigQuoteRequest -Body @{ productId = 'widgets'; price = -1; techHours = 0; vcioHours = 0 }
         $Result.Errors.Count | Should -Be 2
     }
 
     It 'validates a PSCustomObject payload the same as a hashtable (Request.Body shape)' {
-        $Body = [PSCustomObject]@{ productId = 'aidf'; price = 11000 }
+        $Body = [PSCustomObject]@{ productId = 'aidf'; price = 11000; techHours = 0; vcioHours = 0 }
         (Test-OmzigQuoteRequest -Body $Body).IsValid | Should -BeTrue
 
-        $BadBody = [PSCustomObject]@{ productId = 'nope'; price = 11000 }
+        $BadBody = [PSCustomObject]@{ productId = 'nope'; price = 11000; techHours = 0; vcioHours = 0 }
         (Test-OmzigQuoteRequest -Body $BadBody).IsValid | Should -BeFalse
     }
 
-    It 'does not require optional fields to be present' {
-        (Test-OmzigQuoteRequest -Body @{ productId = 'aid'; price = 15500 }).IsValid | Should -BeTrue
+    It 'still treats overrideToken/overrideExpiry as optional' {
+        (Test-OmzigQuoteRequest -Body @{ productId = 'aid'; price = 15500; techHours = 2; vcioHours = 1 }).IsValid | Should -BeTrue
     }
 }
 
@@ -177,7 +190,7 @@ Describe 'Invoke-ExecOmzigQuote (entrypoint)' {
     }
 
     It 'evaluates a below-floor quote as refused with violations' {
-        $Request = New-OmzigTestRequest -Body ([PSCustomObject]@{ productId = 'aidf'; price = 9000 })
+        $Request = New-OmzigTestRequest -Body ([PSCustomObject]@{ productId = 'aidf'; price = 9000; techHours = 0; vcioHours = 0 })
         $Response = Invoke-ExecOmzigQuote -Request $Request -TriggerMetadata $null
 
         $Response.StatusCode | Should -Be ([System.Net.HttpStatusCode]::OK)
@@ -189,6 +202,8 @@ Describe 'Invoke-ExecOmzigQuote (entrypoint)' {
         $Request = New-OmzigTestRequest -Body ([PSCustomObject]@{
                 productId     = 'aira'
                 price         = 2000
+                techHours     = 0
+                vcioHours     = 0
                 overrideToken = 'whatever'
             })
         $Response = Invoke-ExecOmzigQuote -Request $Request -TriggerMetadata $null
@@ -199,7 +214,7 @@ Describe 'Invoke-ExecOmzigQuote (entrypoint)' {
     }
 
     It 'never returns a signingKey property on the response body' {
-        $Request = New-OmzigTestRequest -Body ([PSCustomObject]@{ productId = 'aira'; price = 4000 })
+        $Request = New-OmzigTestRequest -Body ([PSCustomObject]@{ productId = 'aira'; price = 4000; techHours = 0; vcioHours = 0 })
         $Response = Invoke-ExecOmzigQuote -Request $Request -TriggerMetadata $null
 
         $Response.Body.PSObject.Properties.Name | Should -Not -Contain 'SigningKey'
@@ -213,6 +228,8 @@ Describe 'Invoke-ExecOmzigQuote (entrypoint)' {
             $Request = New-OmzigTestRequest -Body ([PSCustomObject]@{
                     productId  = 'aidf'
                     price      = 9000
+                    techHours  = 0
+                    vcioHours  = 0
                     signingKey = 'attacker-supplied-key'
                 })
             $Response = Invoke-ExecOmzigQuote -Request $Request -TriggerMetadata $null
@@ -224,5 +241,65 @@ Describe 'Invoke-ExecOmzigQuote (entrypoint)' {
         } finally {
             $env:OMZIG_OVERRIDE_SIGNING_KEY = $Old
         }
+    }
+}
+
+Describe 'Override token expiry binding (audit #8)' {
+    BeforeAll {
+        $script:SignKey = 'test-signing-key-abc123'
+        function script:MakeToken {
+            param($ProductId, $Price, $Expiry)
+            $Msg = if ($null -ne $Expiry) { "${ProductId}:${Price}:${Expiry}" } else { "${ProductId}:${Price}" }
+            $Hmac = [System.Security.Cryptography.HMACSHA256]::new([Text.Encoding]::UTF8.GetBytes($script:SignKey))
+            [Convert]::ToBase64String($Hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes($Msg)))
+        }
+    }
+
+    It 'approves a below-floor quote with a valid, unexpired expiry-bound token' {
+        $Expiry = [DateTimeOffset]::UtcNow.AddHours(1).ToUnixTimeSeconds()
+        $Token = script:MakeToken 'aidf' 9000 $Expiry
+        $Result = Test-OmzigQuoteFloor -ProductId 'aidf' -Price 9000 -TechHours 20 -VcioHours 10 -OverrideToken $Token -OverrideExpiry $Expiry -SigningKey $script:SignKey
+        $Result.OverrideValid | Should -BeTrue
+        $Result.Approved | Should -BeTrue
+    }
+
+    It 'refuses an expired token even if the signature is otherwise valid' {
+        $Expiry = [DateTimeOffset]::UtcNow.AddHours(-1).ToUnixTimeSeconds()
+        $Token = script:MakeToken 'aidf' 9000 $Expiry
+        $Result = Test-OmzigQuoteFloor -ProductId 'aidf' -Price 9000 -TechHours 20 -VcioHours 10 -OverrideToken $Token -OverrideExpiry $Expiry -SigningKey $script:SignKey
+        $Result.OverrideValid | Should -BeFalse
+        $Result.Approved | Should -BeFalse
+        ($Result.Violations -join ' ') | Should -BeLike '*expired*'
+    }
+
+    It 'does not accept a legacy (no-expiry) token as if it were expiry-bound' {
+        # A token signed WITHOUT expiry must not validate when an expiry is claimed.
+        $Expiry = [DateTimeOffset]::UtcNow.AddHours(1).ToUnixTimeSeconds()
+        $LegacyToken = script:MakeToken 'aidf' 9000 $null
+        $Result = Test-OmzigQuoteFloor -ProductId 'aidf' -Price 9000 -TechHours 20 -VcioHours 10 -OverrideToken $LegacyToken -OverrideExpiry $Expiry -SigningKey $script:SignKey
+        $Result.OverrideValid | Should -BeFalse
+    }
+
+    It 'still accepts a legacy unbounded token when no expiry is supplied (backward compat)' {
+        $Token = script:MakeToken 'aidf' 9000 $null
+        $Result = Test-OmzigQuoteFloor -ProductId 'aidf' -Price 9000 -TechHours 20 -VcioHours 10 -OverrideToken $Token -SigningKey $script:SignKey
+        $Result.OverrideValid | Should -BeTrue
+    }
+
+    It 'refuses legacy unbounded tokens when OMZIG_OVERRIDE_REQUIRE_EXPIRY=true' {
+        $Old = $env:OMZIG_OVERRIDE_REQUIRE_EXPIRY
+        try {
+            $env:OMZIG_OVERRIDE_REQUIRE_EXPIRY = 'true'
+            $Token = script:MakeToken 'aidf' 9000 $null
+            $Result = Test-OmzigQuoteFloor -ProductId 'aidf' -Price 9000 -TechHours 20 -VcioHours 10 -OverrideToken $Token -SigningKey $script:SignKey
+            $Result.OverrideValid | Should -BeFalse
+            ($Result.Violations -join ' ') | Should -BeLike '*must carry an expiry*'
+        } finally {
+            $env:OMZIG_OVERRIDE_REQUIRE_EXPIRY = $Old
+        }
+    }
+
+    It 'rejects negative hours at the floor boundary (audit #9 defense in depth)' {
+        { Test-OmzigQuoteFloor -ProductId 'aidf' -Price 11000 -TechHours -5 -VcioHours 0 } | Should -Throw
     }
 }

@@ -14,7 +14,10 @@
     )
 
     $Results = [System.Collections.Generic.List[object]]::new()
-    $Endpoint = "site/$SiteUid/devices?max=250&page=0"
+    # Audit #13: URL-encode the caller-influenced path segment so it can't add
+    # query params or traverse to other Datto endpoints (defense in depth on
+    # top of the GUID validation at the settings boundary).
+    $Endpoint = "site/$([uri]::EscapeDataString($SiteUid))/devices?max=250&page=0"
     for ($Page = 0; $Page -lt $MaxPages; $Page++) {
         $Response = Invoke-OmzigDattoRmmRequest -Endpoint $Endpoint
         foreach ($Device in $Response.devices) { $Results.Add($Device) }

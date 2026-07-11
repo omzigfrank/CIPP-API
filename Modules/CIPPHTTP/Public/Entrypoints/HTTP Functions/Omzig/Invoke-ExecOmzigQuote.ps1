@@ -37,6 +37,10 @@
         if (@($Request.Body.PSObject.Properties.Name) -contains 'overrideToken' -and -not [string]::IsNullOrEmpty($Request.Body.overrideToken)) {
             $QuoteParams.OverrideToken = $Request.Body.overrideToken
         }
+        # Audit #8: optional expiry that binds the override token to a deadline.
+        if (@($Request.Body.PSObject.Properties.Name) -contains 'overrideExpiry' -and -not [string]::IsNullOrEmpty($Request.Body.overrideExpiry.ToString())) {
+            $QuoteParams.OverrideExpiry = [long]$Request.Body.overrideExpiry
+        }
 
         # Signing key is never accepted from the request body — the env var
         # (Test-OmzigQuoteFloor's own default) is the only source.
@@ -46,8 +50,10 @@
         $StatusCode = [HttpStatusCode]::OK
         $Body = $Result
     } catch {
+        # Audit #4-low: normalize the error rather than returning the raw
+        # exception text/stack to the client.
         $StatusCode = [HttpStatusCode]::BadRequest
-        $Body = @{ Error = $_.Exception.Message }
+        $Body = @{ Error = (Get-CippException -Exception $_).NormalizedError }
     }
 
     return ([HttpResponseContext]@{
