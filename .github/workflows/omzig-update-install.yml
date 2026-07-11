@@ -138,7 +138,9 @@ jobs:
           git push origin "HEAD:${TARGET_BRANCH}"
           # GITHUB_TOKEN pushes don't retrigger push-based workflows; dispatch
           # the deploy explicitly (workflow_dispatch is exempt from that rule).
-          gh workflow run "${DEPLOY_WORKFLOW}" --ref "${TARGET_BRANCH}" || \
+          # --repo is required: the workspace has an 'upstream' remote, and
+          # without it gh resolves the fork parent and 404s.
+          gh workflow run "${DEPLOY_WORKFLOW}" --repo "${GITHUB_REPOSITORY}" --ref "${TARGET_BRANCH}" || \
             echo "::warning::Pushed the update but could not dispatch ${DEPLOY_WORKFLOW} — run it manually."
 
       - name: Open review PR
