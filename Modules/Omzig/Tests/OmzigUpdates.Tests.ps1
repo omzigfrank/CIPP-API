@@ -5,6 +5,13 @@
 # (the Omzig module resolves them through normal dynamic scoping), so no
 # network and no table storage are ever touched.
 
+# Top-level so it is available at both discovery and run time.
+function NewPrincipalHeader {
+    param([string]$Upn)
+    [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(
+        (@{ userDetails = $Upn; userRoles = @('authenticated') } | ConvertTo-Json -Compress)))
+}
+
 BeforeAll {
     Import-Module (Join-Path $PSScriptRoot '..' 'Omzig.psd1') -Force
 
@@ -27,6 +34,12 @@ BeforeAll {
     $script:ReleasesFixture = @()
     $script:DevBranchFixture = $null
     $script:GitHubReadsFail = $false
+    # Access-control state: the configured updater group, the caller's group
+    # memberships, and the caller's CIPP roles.
+    $script:UPDATER_GROUP = '11111111-1111-1111-1111-111111111111'
+    $script:UpdaterGroupEntity = [PSCustomObject]@{ UpdaterGroupId = $script:UPDATER_GROUP; UpdaterGroupName = 'ŌMZIG Updaters' }
+    $script:GroupMemberships = @($script:UPDATER_GROUP)  # caller is a member by default
+    $script:CallerRoles = @('editor')                    # caller is a plain editor by default
 
     function Global:Get-CIPPTable {
         param($TableName)
@@ -42,10 +55,34 @@ BeforeAll {
                 }
                 return [PSCustomObject]@{ config = '{"GitHub":{"Enabled":false}}' }
             }
-            'OmzigUpdateSettings' { return $script:UpdateSettingsEntity }
+            'OmzigUpdateSettings' {
+                if ($Filter -match 'UpdateAccess') { return $script:UpdaterGroupEntity }
+                return $script:UpdateSettingsEntity
+            }
         }
         return $null
     }
+
+    # Base64 SWA client-principal header for a given UPN (run-time helper).
+    function Global:NewPrincipalHeader {
+        param([string]$Upn)
+        [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes(
+            (@{ userDetails = $Upn; userRoles = @('authenticated') } | ConvertTo-Json -Compress)))
+    }
+
+    # CIPP core auth helpers the Omzig update endpoints depend on.
+    function Global:Get-CIPPAccessRole {
+        param($Request, $Headers)
+        return $script:CallerRoles
+    }
+    function Global:New-GraphGetRequest {
+        param($uri, $NoAuthCheck, $AsApp, $tenantid)
+        # Return the caller's group memberships as Graph directoryObjects.
+        return @($script:GroupMemberships | ForEach-Object {
+                [PSCustomObject]@{ '@odata.type' = '#microsoft.graph.group'; id = $_ }
+            })
+    }
+
 
     function Global:Add-CIPPAzDataTableEntity {
         param($TableName, $Entity, [switch]$Force)
@@ -90,7 +127,7 @@ BeforeAll {
 }
 
 AfterAll {
-    foreach ($Name in 'Get-CIPPTable', 'Get-CIPPAzDataTableEntity', 'Add-CIPPAzDataTableEntity', 'Invoke-GitHubApiRequest', 'Write-LogMessage') {
+    foreach ($Name in 'Get-CIPPTable', 'Get-CIPPAzDataTableEntity', 'Add-CIPPAzDataTableEntity', 'Invoke-GitHubApiRequest', 'Write-LogMessage', 'Get-CIPPAccessRole', 'New-GraphGetRequest') {
         Remove-Item -Path "function:Global:$Name" -ErrorAction SilentlyContinue
     }
 }
@@ -256,22 +293,81 @@ Describe 'Start-OmzigUpdateInstall' {
     }
 }
 
+Describe 'Get/Set-OmzigUpdaterGroup and Test-OmzigUpdateAuthorized' {
+    BeforeEach {
+        $script:SavedEntities.Clear()
+        $script:UpdaterGroupEntity = [PSCustomObject]@{ UpdaterGroupId = $script:UPDATER_GROUP; UpdaterGroupName = 'ŌMZIG Updaters' }
+        $script:GroupMemberships = @($script:UPDATER_GROUP)
+    }
+
+    It 'reads the configured updater group from the table' {
+        $Group = Get-OmzigUpdaterGroup
+        $Group.GroupId | Should -Be $script:UPDATER_GROUP
+        $Group.Configured | Should -BeTrue
+    }
+
+    It 'falls back to OMZIG_UPDATE_GROUP_ID when the table is empty' {
+        $script:UpdaterGroupEntity = $null
+        $env:OMZIG_UPDATE_GROUP_ID = '22222222-2222-2222-2222-222222222222'
+        try {
+            (Get-OmzigUpdaterGroup).GroupId | Should -Be '22222222-2222-2222-2222-222222222222'
+        } finally { Remove-Item Env:OMZIG_UPDATE_GROUP_ID -ErrorAction SilentlyContinue }
+    }
+
+    It 'rejects a non-GUID group id' {
+        { Set-OmzigUpdaterGroup -GroupId 'not-a-guid' } | Should -Throw
+    }
+
+    It 'authorizes a member and denies a non-member' {
+        (Test-OmzigUpdateAuthorized -UserPrincipalName 'in@omzig.it').Authorized | Should -BeTrue
+        $script:GroupMemberships = @('99999999-9999-9999-9999-999999999999')
+        (Test-OmzigUpdateAuthorized -UserPrincipalName 'out@omzig.it').Authorized | Should -BeFalse
+    }
+
+    It 'fails closed when no group is configured' {
+        $script:UpdaterGroupEntity = $null
+        (Test-OmzigUpdateAuthorized -UserPrincipalName 'in@omzig.it').Authorized | Should -BeFalse
+    }
+
+    It 'denies when the caller identity cannot be resolved' {
+        (Test-OmzigUpdateAuthorized -UserPrincipalName '').Authorized | Should -BeFalse
+    }
+}
+
 Describe 'Invoke-ListOmzigUpdateStatus (GET entrypoint)' {
     BeforeEach {
         $script:GitHubReadsFail = $false
         $script:ReleasesFixture = $script:ReleasesDefault
         $script:DevBranchFixture = $script:DevBranchDefault
         $script:UpdateSettingsEntity = $null
+        $script:UpdaterGroupEntity = [PSCustomObject]@{ UpdaterGroupId = $script:UPDATER_GROUP; UpdaterGroupName = 'ŌMZIG Updaters' }
+        $script:GroupMemberships = @($script:UPDATER_GROUP)
+        $script:CallerRoles = @('editor')
         $script:GitHubEnabled = $true
     }
 
-    It 'returns 200 with channels, settings and integration state' {
-        $Response = Invoke-ListOmzigUpdateStatus -Request @{ Params = @{ CIPPEndpoint = 'ListOmzigUpdateStatus' }; Headers = @{} } -TriggerMetadata @{}
+    It 'returns 200 with channels, settings, integration and access state' {
+        $Request = @{
+            Params  = @{ CIPPEndpoint = 'ListOmzigUpdateStatus' }
+            Headers = @{ 'x-ms-client-principal' = (NewPrincipalHeader 'updater@omzig.it') }
+        }
+        $Response = Invoke-ListOmzigUpdateStatus -Request $Request -TriggerMetadata @{}
         $Response.StatusCode | Should -Be 200
         $Response.Body.Channels.Frontend.Stable.Version | Should -Be 'v10.5.8'
         $Response.Body.Settings.Channel | Should -Be 'stable'
         $Response.Body.GitHubIntegration | Should -BeTrue
         $Response.Body.Repos.Frontend.Fork | Should -Be 'omzigfrank/CIPP'
+        $Response.Body.Access.GroupConfigured | Should -BeTrue
+        $Response.Body.Access.CallerIsUpdater | Should -BeTrue
+    }
+
+    It 'reports CallerIsUpdater=false for a non-member' {
+        $script:GroupMemberships = @('99999999-9999-9999-9999-999999999999')
+        $Request = @{
+            Params  = @{ CIPPEndpoint = 'ListOmzigUpdateStatus' }
+            Headers = @{ 'x-ms-client-principal' = (NewPrincipalHeader 'outsider@omzig.it') }
+        }
+        (Invoke-ListOmzigUpdateStatus -Request $Request -TriggerMetadata @{}).Body.Access.CallerIsUpdater | Should -BeFalse
     }
 }
 
@@ -280,13 +376,18 @@ Describe 'Invoke-ExecOmzigUpdates (POST entrypoint)' {
         $script:SavedEntities.Clear()
         $script:GitHubCalls.Clear()
         $script:GitHubPatchFails = $false
+        # Default caller: an editor who IS a member of the updater group.
+        $script:UpdaterGroupEntity = [PSCustomObject]@{ UpdaterGroupId = $script:UPDATER_GROUP; UpdaterGroupName = 'ŌMZIG Updaters' }
+        $script:GroupMemberships = @($script:UPDATER_GROUP)
+        $script:CallerRoles = @('editor')
+        $script:MemberHeaders = @{ 'x-ms-client-principal' = (NewPrincipalHeader 'updater@omzig.it') }
     }
 
-    It 'routes SetSchedule and returns the applied settings' {
+    It 'routes SetSchedule for a group member and returns the applied settings' {
         $script:GitHubEnabled = $true
         $Request = @{
             Params  = @{ CIPPEndpoint = 'ExecOmzigUpdates' }
-            Headers = @{}
+            Headers = $script:MemberHeaders
             Body    = [PSCustomObject]@{ Action = 'SetSchedule'; autoUpdate = $true; channel = 'stable'; mode = 'install' }
         }
         $Response = Invoke-ExecOmzigUpdates -Request $Request -TriggerMetadata @{}
@@ -295,11 +396,11 @@ Describe 'Invoke-ExecOmzigUpdates (POST entrypoint)' {
         $Response.Body.AppliedToGitHub | Should -BeTrue
     }
 
-    It 'routes InstallNow and surfaces the dispatch summary' {
+    It 'routes InstallNow for a group member and surfaces the dispatch summary' {
         $script:GitHubEnabled = $true
         $Request = @{
             Params  = @{ CIPPEndpoint = 'ExecOmzigUpdates' }
-            Headers = @{}
+            Headers = $script:MemberHeaders
             Body    = [PSCustomObject]@{ Action = 'InstallNow'; channel = 'prerelease' }
         }
         $Response = Invoke-ExecOmzigUpdates -Request $Request -TriggerMetadata @{}
@@ -308,11 +409,75 @@ Describe 'Invoke-ExecOmzigUpdates (POST entrypoint)' {
         $Response.Body.Dispatched.Count | Should -Be 2
     }
 
-    It 'returns 400 with the actionable message when InstallNow lacks the integration' {
+    It 'returns 403 for InstallNow when the caller is NOT in the updater group' {
+        $script:GitHubEnabled = $true
+        $script:GroupMemberships = @('99999999-9999-9999-9999-999999999999')
+        $Request = @{
+            Params  = @{ CIPPEndpoint = 'ExecOmzigUpdates' }
+            Headers = @{ 'x-ms-client-principal' = (NewPrincipalHeader 'outsider@omzig.it') }
+            Body    = [PSCustomObject]@{ Action = 'InstallNow'; channel = 'stable' }
+        }
+        $Response = Invoke-ExecOmzigUpdates -Request $Request -TriggerMetadata @{}
+        $Response.StatusCode | Should -Be 403
+        $Response.Body.Error | Should -Match 'not a member of the updater group'
+        # No dispatch happened.
+        ($script:GitHubCalls | Where-Object { $_.Path -match 'dispatches' }) | Should -BeNullOrEmpty
+    }
+
+    It 'returns 403 for SetSchedule when the caller is NOT in the updater group' {
+        $script:GroupMemberships = @('99999999-9999-9999-9999-999999999999')
+        $Request = @{
+            Params  = @{ CIPPEndpoint = 'ExecOmzigUpdates' }
+            Headers = @{ 'x-ms-client-principal' = (NewPrincipalHeader 'outsider@omzig.it') }
+            Body    = [PSCustomObject]@{ Action = 'SetSchedule'; autoUpdate = $true; channel = 'dev'; mode = 'install' }
+        }
+        $Response = Invoke-ExecOmzigUpdates -Request $Request -TriggerMetadata @{}
+        $Response.StatusCode | Should -Be 403
+    }
+
+    It 'returns 403 for InstallNow when no updater group is configured (fail closed)' {
+        $script:GitHubEnabled = $true
+        $script:UpdaterGroupEntity = $null
+        $Request = @{
+            Params  = @{ CIPPEndpoint = 'ExecOmzigUpdates' }
+            Headers = $script:MemberHeaders
+            Body    = [PSCustomObject]@{ Action = 'InstallNow'; channel = 'stable' }
+        }
+        $Response = Invoke-ExecOmzigUpdates -Request $Request -TriggerMetadata @{}
+        $Response.StatusCode | Should -Be 403
+        $Response.Body.Error | Should -Match 'No updater group'
+    }
+
+    It 'lets a superadmin set the updater group' {
+        $script:CallerRoles = @('superadmin')
+        $Request = @{
+            Params  = @{ CIPPEndpoint = 'ExecOmzigUpdates' }
+            Headers = @{ 'x-ms-client-principal' = (NewPrincipalHeader 'boss@omzig.it') }
+            Body    = [PSCustomObject]@{ Action = 'SetUpdaterGroup'; groupId = '33333333-3333-3333-3333-333333333333'; groupName = 'Ops' }
+        }
+        $Response = Invoke-ExecOmzigUpdates -Request $Request -TriggerMetadata @{}
+        $Response.StatusCode | Should -Be 200
+        $Response.Body.Saved | Should -BeTrue
+        ($script:SavedEntities | Where-Object { $_.Entity.RowKey -eq 'UpdateAccess' }).Entity.UpdaterGroupId | Should -Be '33333333-3333-3333-3333-333333333333'
+    }
+
+    It 'returns 403 when a non-superadmin tries to set the updater group' {
+        $script:CallerRoles = @('editor')
+        $Request = @{
+            Params  = @{ CIPPEndpoint = 'ExecOmzigUpdates' }
+            Headers = $script:MemberHeaders
+            Body    = [PSCustomObject]@{ Action = 'SetUpdaterGroup'; groupId = '33333333-3333-3333-3333-333333333333' }
+        }
+        $Response = Invoke-ExecOmzigUpdates -Request $Request -TriggerMetadata @{}
+        $Response.StatusCode | Should -Be 403
+        $Response.Body.Error | Should -Match 'superadmin'
+    }
+
+    It 'returns 400 with the actionable message when a member InstallNow lacks the integration' {
         $script:GitHubEnabled = $false
         $Request = @{
             Params  = @{ CIPPEndpoint = 'ExecOmzigUpdates' }
-            Headers = @{}
+            Headers = $script:MemberHeaders
             Body    = [PSCustomObject]@{ Action = 'InstallNow'; channel = 'stable' }
         }
         $Response = Invoke-ExecOmzigUpdates -Request $Request -TriggerMetadata @{}
@@ -320,10 +485,10 @@ Describe 'Invoke-ExecOmzigUpdates (POST entrypoint)' {
         $Response.Body.Error | Should -Match 'GitHub integration'
     }
 
-    It 'returns 400 for an unknown action' {
+    It 'returns 400 for an unknown action (from a group member)' {
         $Request = @{
             Params  = @{ CIPPEndpoint = 'ExecOmzigUpdates' }
-            Headers = @{}
+            Headers = $script:MemberHeaders
             Body    = [PSCustomObject]@{ Action = 'SelfDestruct' }
         }
         $Response = Invoke-ExecOmzigUpdates -Request $Request -TriggerMetadata @{}
