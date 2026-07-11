@@ -37,12 +37,35 @@ function Invoke-ListOmzigUpdateStatus {
         }
     }
 
+    # Access control state so the UI can enable/disable the write controls.
+    $CallerUpn = $null
+    try {
+        $CallerUpn = ([System.Text.Encoding]::UTF8.GetString([System.Convert]::FromBase64String($Request.Headers.'x-ms-client-principal')) | ConvertFrom-Json).userDetails
+    } catch {
+        Write-Verbose "Caller principal undecodable: $($_.Exception.Message)"
+    }
+    $Group = Get-OmzigUpdaterGroup
+    $CallerIsUpdater = (Test-OmzigUpdateAuthorized -UserPrincipalName $CallerUpn).Authorized
+    $CallerIsSuperAdmin = $false
+    try {
+        $CallerIsSuperAdmin = (Get-CIPPAccessRole -Request $Request) -contains 'superadmin'
+    } catch {
+        Write-Verbose "Role resolution failed: $($_.Exception.Message)"
+    }
+
     $Body = [PSCustomObject]@{
-        LocalApiVersion   = $LocalApiVersion
-        Channels          = Get-OmzigUpdateChannels
-        Settings          = Get-OmzigUpdateSettings
-        GitHubIntegration = Test-OmzigGitHubIntegration
-        Repos             = Get-OmzigUpdateRepos
+        LocalApiVersion    = $LocalApiVersion
+        Channels           = Get-OmzigUpdateChannels
+        Settings           = Get-OmzigUpdateSettings
+        GitHubIntegration  = Test-OmzigGitHubIntegration
+        Repos              = Get-OmzigUpdateRepos
+        Access             = [PSCustomObject]@{
+            UpdaterGroupId     = $Group.GroupId
+            UpdaterGroupName   = $Group.GroupName
+            GroupConfigured    = $Group.Configured
+            CallerIsUpdater    = $CallerIsUpdater
+            CallerIsSuperAdmin = $CallerIsSuperAdmin
+        }
     }
 
     return ([HttpResponseContext]@{

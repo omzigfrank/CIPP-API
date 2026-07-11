@@ -56,30 +56,57 @@ jobs:
 
       - name: Resolve channel and mode
         id: cfg
+        # ŌMZIG audit hardening: all external/variable inputs come in via env
+        # and are referenced as quoted shell variables — never interpolated as
+        # ${{ }} inside run: (which would allow command injection through a
+        # crafted upstream tag or repo variable).
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          VAR_AUTO_UPDATE: ${{ vars.OMZIG_AUTO_UPDATE }}
+          VAR_CHANNEL: ${{ vars.OMZIG_UPDATE_CHANNEL }}
+          VAR_MODE: ${{ vars.OMZIG_AUTO_UPDATE_MODE }}
+          INPUT_CHANNEL: ${{ github.event.inputs.channel }}
+          INPUT_MODE: ${{ github.event.inputs.mode }}
         run: |
-          if [ "${{ github.event_name }}" = "schedule" ]; then
-            if [ "${{ vars.OMZIG_AUTO_UPDATE }}" != "true" ]; then
+          if [ "$EVENT_NAME" = "schedule" ]; then
+            if [ "$VAR_AUTO_UPDATE" != "true" ]; then
               echo "Scheduled run and OMZIG_AUTO_UPDATE is not 'true' — nothing to do."
               echo "enabled=false" >> "$GITHUB_OUTPUT"
               exit 0
             fi
-            CHANNEL="${{ vars.OMZIG_UPDATE_CHANNEL }}"
-            MODE="${{ vars.OMZIG_AUTO_UPDATE_MODE }}"
+            CHANNEL="$VAR_CHANNEL"
+            MODE="$VAR_MODE"
           else
-            CHANNEL="${{ github.event.inputs.channel }}"
-            MODE="${{ github.event.inputs.mode }}"
+            CHANNEL="$INPUT_CHANNEL"
+            MODE="$INPUT_MODE"
           fi
+          CHANNEL="${CHANNEL:-stable}"
+          MODE="${MODE:-install}"
+
+          # Allow-list channel and mode before any downstream use.
+          case "$CHANNEL" in stable|prerelease|dev) ;; *) echo "::error::Unknown channel '$CHANNEL'"; exit 1 ;; esac
+          case "$MODE" in install|pr) ;; *) echo "::error::Unknown mode '$MODE'"; exit 1 ;; esac
+
+          # ŌMZIG audit #1 (governance): only the STABLE channel — a published
+          # upstream release — may install directly to the deploy branch.
+          # prerelease/dev carry unreviewed upstream code, so they are ALWAYS
+          # routed through a review PR and never auto-deployed to production.
+          if [ "$CHANNEL" != "stable" ] && [ "$MODE" = "install" ]; then
+            echo "::warning::Channel '$CHANNEL' cannot be installed directly; routing through a review PR for a human to merge."
+            MODE="pr"
+          fi
+
           echo "enabled=true" >> "$GITHUB_OUTPUT"
-          echo "channel=${CHANNEL:-stable}" >> "$GITHUB_OUTPUT"
-          echo "mode=${MODE:-install}" >> "$GITHUB_OUTPUT"
+          echo "channel=$CHANNEL" >> "$GITHUB_OUTPUT"
+          echo "mode=$MODE" >> "$GITHUB_OUTPUT"
 
       - name: Resolve upstream ref for channel
         if: steps.cfg.outputs.enabled == 'true'
         id: ref
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          CHANNEL: ${{ steps.cfg.outputs.channel }}
         run: |
-          CHANNEL="${{ steps.cfg.outputs.channel }}"
           case "$CHANNEL" in
             stable)
               REF="$(gh api "repos/${UPSTREAM_REPO}/releases/latest" --jq '.tag_name')"
@@ -106,21 +133,24 @@ jobs:
       - name: Merge upstream ref
         if: steps.cfg.outputs.enabled == 'true'
         id: merge
+        env:
+          REF: ${{ steps.ref.outputs.ref }}
+          CHANNEL: ${{ steps.cfg.outputs.channel }}
         run: |
           git config user.name 'omzig-portal-bot'
           git config user.email 'hello@omzig.it'
           git remote add upstream "https://github.com/${UPSTREAM_REPO}.git"
-          git fetch upstream "${{ steps.ref.outputs.ref }}"
+          git fetch upstream "$REF"
 
           if git merge-base --is-ancestor FETCH_HEAD HEAD; then
-            echo "Already contains ${UPSTREAM_REPO}@${{ steps.ref.outputs.ref }} — up to date."
+            echo "Already contains ${UPSTREAM_REPO}@$REF — up to date."
             echo "state=uptodate" >> "$GITHUB_OUTPUT"
             exit 0
           fi
 
           set +e
           git merge --no-edit FETCH_HEAD \
-            -m "chore: install CIPP update — ${UPSTREAM_REPO}@${{ steps.ref.outputs.ref }} (${{ steps.cfg.outputs.channel }} channel)"
+            -m "chore: install CIPP update — ${UPSTREAM_REPO}@$REF ($CHANNEL channel)"
           RESULT=$?
           set -e
           if [ $RESULT -ne 0 ]; then
@@ -147,23 +177,27 @@ jobs:
         if: steps.merge.outputs.state == 'merged' && steps.cfg.outputs.mode == 'pr'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REF: ${{ steps.ref.outputs.ref }}
+          CHANNEL: ${{ steps.cfg.outputs.channel }}
         run: |
-          BRANCH="omzig/update-${{ steps.cfg.outputs.channel }}-$(date -u +%Y-%m-%d-%H%M)"
+          BRANCH="omzig/update-$CHANNEL-$(date -u +%Y-%m-%d-%H%M)"
           git checkout -b "$BRANCH"
           git push -u origin "$BRANCH"
           gh pr create \
             --base "${TARGET_BRANCH}" \
             --head "$BRANCH" \
-            --title "chore: CIPP update — ${{ steps.ref.outputs.ref }} (${{ steps.cfg.outputs.channel }})" \
-            --body "Update from \`${UPSTREAM_REPO}@${{ steps.ref.outputs.ref }}\` on the ${{ steps.cfg.outputs.channel }} channel, requested via the ŌMZIG Update Center in PR mode. Review the overlay touchpoints before merging."
+            --title "chore: CIPP update — $REF ($CHANNEL)" \
+            --body "Update from \`${UPSTREAM_REPO}@$REF\` on the $CHANNEL channel, requested via the ŌMZIG Update Center. Review the overlay touchpoints before merging."
 
       - name: Open conflict issue
         if: steps.merge.outputs.state == 'conflicted'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REF: ${{ steps.ref.outputs.ref }}
+          CHANNEL: ${{ steps.cfg.outputs.channel }}
         run: |
           gh issue create \
-            --title "Update install conflict — ${{ steps.ref.outputs.ref }} (${{ steps.cfg.outputs.channel }})" \
+            --title "Update install conflict — $REF ($CHANNEL)" \
             --label 'upstream-sync' \
-            --body "Installing \`${UPSTREAM_REPO}@${{ steps.ref.outputs.ref }}\` hit merge conflicts and was aborted — nothing was deployed. Expected conflict surface: the marked ŌMZIG overlay touchpoints. Resolve locally and push, or run the weekly sync flow."
+            --body "Installing \`${UPSTREAM_REPO}@$REF\` hit merge conflicts and was aborted — nothing was deployed. Expected conflict surface: the marked ŌMZIG overlay touchpoints. Resolve locally and push, or run the weekly sync flow."
           exit 1
