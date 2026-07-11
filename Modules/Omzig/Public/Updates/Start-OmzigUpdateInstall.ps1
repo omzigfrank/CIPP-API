@@ -52,7 +52,10 @@ function Start-OmzigUpdateInstall {
             })
     }
 
+    $Verb = if ($Mode -eq 'pr') { 'update review PR requested' } else { 'install dispatched' }
     [PSCustomObject]@{
+        # CippApiResults renders Results as the single success line.
+        Results    = "$($Channel) $Verb on $($Repos.Frontend.Fork) and $($Repos.Api.Fork). If the repositories already contain the target release the run reports 'up to date' and changes nothing — follow the linked workflow runs for the outcome."
         Channel    = $Channel
         Mode       = $Mode
         Dispatched = @($Dispatched)
