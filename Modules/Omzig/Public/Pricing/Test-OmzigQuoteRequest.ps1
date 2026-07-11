@@ -57,6 +57,24 @@
         }
     }
 
+    # Audit #9: techHours/vcioHours are REQUIRED and must be non-negative.
+    # Omitting them defaulted the cost basis to 0 → a fake 100% gross margin
+    # that always cleared the 70% floor; a negative value pushed the cost
+    # below zero to inflate margin past 100%. Both are now rejected up front.
+    foreach ($HoursField in @('techHours', 'vcioHours')) {
+        if (-not (& $HasProperty $Body $HoursField) -or $null -eq (& $GetValue $Body $HoursField) -or [string]::IsNullOrEmpty((& $GetValue $Body $HoursField).ToString())) {
+            $Errors.Add("$HoursField is required (use 0 only when there is genuinely no such effort).")
+        } else {
+            $HoursValue = & $GetValue $Body $HoursField
+            $ParsedHours = 0
+            if (-not [decimal]::TryParse([string]$HoursValue, [ref]$ParsedHours)) {
+                $Errors.Add("$HoursField '$HoursValue' must be a number.")
+            } elseif ($ParsedHours -lt 0) {
+                $Errors.Add("$HoursField must be zero or positive; got $HoursValue.")
+            }
+        }
+    }
+
     [PSCustomObject]@{
         IsValid = ($Errors.Count -eq 0)
         Errors  = @($Errors)

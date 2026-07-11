@@ -33,9 +33,16 @@
     param(
         [Parameter(Mandatory)][ValidateSet('aira', 'aidf', 'aid', 'maio')][string]$ProductId,
         [Parameter(Mandatory)][decimal]$Price,
-        [decimal]$TechHours = 0,
-        [decimal]$VcioHours = 0,
+        # Audit #9: negative hours would push the cost basis below zero and
+        # inflate margin past 100%. Reject at the boundary as defense in depth
+        # (Test-OmzigQuoteRequest also rejects them before we get here).
+        [ValidateRange(0, [double]::MaxValue)][decimal]$TechHours = 0,
+        [ValidateRange(0, [double]::MaxValue)][decimal]$VcioHours = 0,
         [string]$OverrideToken,
+        # Audit #8: optional Unix-seconds expiry. When the caller supplies an
+        # expiry, it is bound into the signed message and the token is rejected
+        # once past — so a leaked override is no longer replayable forever.
+        [Nullable[long]]$OverrideExpiry,
         [string]$SigningKey = $env:OMZIG_OVERRIDE_SIGNING_KEY
     )
 
@@ -60,7 +67,28 @@
             $Violations.Add("$($Product.Name) is never discounted — override tokens are not accepted for this product.")
         } elseif ([string]::IsNullOrEmpty($SigningKey)) {
             $Violations.Add('OMZIG_OVERRIDE_SIGNING_KEY is not configured; override token cannot be verified.')
+        } elseif ($null -ne $OverrideExpiry) {
+            # Expiry-bound token (audit #8): reject once past, otherwise verify
+            # the signature over "<productId>:<price>:<expiry>".
+            $Now = [DateTimeOffset]::UtcNow.ToUnixTimeSeconds()
+            if ($OverrideExpiry -lt $Now) {
+                $Violations.Add('Override token has expired.')
+            } else {
+                $Hmac = [System.Security.Cryptography.HMACSHA256]::new([Text.Encoding]::UTF8.GetBytes($SigningKey))
+                $Expected = [Convert]::ToBase64String($Hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes("${ProductId}:${Price}:${OverrideExpiry}")))
+                $OverrideValid = [System.Security.Cryptography.CryptographicOperations]::FixedTimeEquals(
+                    [Text.Encoding]::UTF8.GetBytes($Expected),
+                    [Text.Encoding]::UTF8.GetBytes($OverrideToken))
+                if (-not $OverrideValid) { $Violations.Add('Override token signature is invalid for this product/price/expiry.') }
+            }
+        } elseif ($env:OMZIG_OVERRIDE_REQUIRE_EXPIRY -eq 'true') {
+            # Migration switch: once Frank's signer emits expiry-bound tokens,
+            # set OMZIG_OVERRIDE_REQUIRE_EXPIRY=true to refuse legacy unbounded
+            # (indefinitely replayable) tokens entirely.
+            $Violations.Add('Override tokens must carry an expiry; legacy unbounded tokens are no longer accepted.')
         } else {
+            # Legacy unbounded token: "<productId>:<price>" (no expiry). Still
+            # accepted for backward compatibility until the signer is updated.
             $Hmac = [System.Security.Cryptography.HMACSHA256]::new([Text.Encoding]::UTF8.GetBytes($SigningKey))
             $Expected = [Convert]::ToBase64String($Hmac.ComputeHash([Text.Encoding]::UTF8.GetBytes("${ProductId}:${Price}")))
             $OverrideValid = [System.Security.Cryptography.CryptographicOperations]::FixedTimeEquals(

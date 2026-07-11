@@ -26,11 +26,11 @@
             $Client = [PSCustomObject]@{
                 Provider              = 'autotask'
                 GetCompanies          = { param($Filter) Invoke-OmzigAutotaskRequest -Method POST -Endpoint 'Companies/query' -Body @{ filter = @(if ($Filter) { $Filter } else { @{ op = 'gte'; field = 'id'; value = 0 } }) } }
-                GetCompany            = { param($CompanyId) Invoke-OmzigAutotaskRequest -Endpoint "Companies/$CompanyId" }
+                GetCompany            = { param($CompanyId) Invoke-OmzigAutotaskRequest -Endpoint "Companies/$([uri]::EscapeDataString([string]$CompanyId))" }
                 GetContacts           = { param($CompanyId) Invoke-OmzigAutotaskRequest -Method POST -Endpoint 'Contacts/query' -Body @{ filter = @(@{ op = 'eq'; field = 'companyID'; value = $CompanyId }) } }
                 NewContact            = { param($Contact) Invoke-OmzigAutotaskRequest -Method POST -Endpoint 'Contacts' -Body $Contact }
                 GetTickets            = { param($CompanyId) Invoke-OmzigAutotaskRequest -Method POST -Endpoint 'Tickets/query' -Body @{ filter = @(@{ op = 'eq'; field = 'companyID'; value = $CompanyId }) } }
-                GetTicket             = { param($TicketId) Invoke-OmzigAutotaskRequest -Endpoint "Tickets/$TicketId" }
+                GetTicket             = { param($TicketId) Invoke-OmzigAutotaskRequest -Endpoint "Tickets/$([uri]::EscapeDataString([string]$TicketId))" }
                 NewTicket             = { param($Ticket) Invoke-OmzigAutotaskRequest -Method POST -Endpoint 'Tickets' -Body $Ticket }
                 UpdateTicket          = { param($TicketId, $Patch) Invoke-OmzigAutotaskRequest -Method PATCH -Endpoint 'Tickets' -Body (@{ id = $TicketId } + $Patch) }
                 GetContracts          = { param($CompanyId) Invoke-OmzigAutotaskRequest -Method POST -Endpoint 'Contracts/query' -Body @{ filter = @(@{ op = 'eq'; field = 'companyID'; value = $CompanyId }) } }

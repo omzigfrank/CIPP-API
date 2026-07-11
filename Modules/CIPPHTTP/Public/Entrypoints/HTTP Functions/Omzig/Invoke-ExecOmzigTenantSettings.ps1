@@ -35,13 +35,23 @@
         }
 
         $Record = Set-OmzigTenantRecord -TenantId $TenantFilter -Properties $Properties
+
+        # Audit #13: a BAA toggle changes the HIPAA/compliance posture, so log
+        # it distinctly (and at Alert severity when it's being turned OFF) for
+        # the audit trail — not buried in the generic settings-update line.
+        if ($Properties.ContainsKey('baa')) {
+            $BaaState = if ($Properties['baa']) { 'ENABLED' } else { 'DISABLED' }
+            $BaaSev = if ($Properties['baa']) { 'Info' } else { 'Alert' }
+            Write-LogMessage -headers $Headers -API $APIName -message "Omzig BAA mode $BaaState for tenant $TenantFilter" -Sev $BaaSev -tenant $TenantFilter
+        }
         Write-LogMessage -headers $Headers -API $APIName -message "Updated Omzig tenant settings for $TenantFilter" -Sev 'Info' -tenant $TenantFilter
 
         $StatusCode = [HttpStatusCode]::OK
         $Body = $Record
     } catch {
+        # Audit #4-low: normalize rather than returning raw exception text.
         $StatusCode = [HttpStatusCode]::BadRequest
-        $Body = @{ Error = $_.Exception.Message }
+        $Body = @{ Error = (Get-CippException -Exception $_).NormalizedError }
     }
 
     return ([HttpResponseContext]@{
