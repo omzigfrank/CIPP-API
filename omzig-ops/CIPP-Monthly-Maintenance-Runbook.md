@@ -153,6 +153,27 @@ It prints one table of findings and sets an exit code: `0` all green, `1` warnin
 
 Then work the findings top-down. Sections 4–7 below are the fixes.
 
+### What the unattended check does and does not cover
+
+The scheduled workflow (`.github/workflows/omzig-cipp-healthcheck.yml`) runs as
+`CIPP-HealthCheck-Reader`, which holds Reader on the resource group, secret
+`get`/`list` on the vault, and **no directory access at all**.
+
+That means it covers the live token test — the leading indicator for an outage —
+but it **cannot read app-registration credentials**, so it does not check the SAM
+secret or certificate expiry runway. Rather than skip those silently, it reports
+them as WARN so a green run always means "checked and fine" rather than "could not
+check". A clean report that quietly omits the most important check is how the
+secret expired unnoticed in July.
+
+Two ways to close the gap; the second needs a decision, not a code change:
+
+- The **human monthly pass** covers it — an operator running the script
+  interactively reads the credentials with their own permissions.
+- Grant the automation Graph `Application.Read.All`. That is tenant-wide
+  application read and needs admin consent, so it is Frank's call rather than an
+  operator's.
+
 ### Step 2 — Close out
 
 Log in the Autotask ticket: date, who ran it, version before/after, findings fixed,

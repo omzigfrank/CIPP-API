@@ -297,6 +297,18 @@ if ($appId) {
     $pwCreds   = Invoke-Az @('ad', 'app', 'credential', 'list', '--id', $appId)
     $certCreds = Invoke-Az @('ad', 'app', 'credential', 'list', '--id', $appId, '--cert')
 
+    # A clean report must mean "checked and fine", never "could not check". Reading
+    # app credentials needs directory access (Graph Application.Read.All); the
+    # scheduled service principal has none, so without this the single most
+    # important check — is the SAM secret about to expire — would vanish silently
+    # and the run would still say all green. That is the failure that took CIPP
+    # down on 2026-07-22.
+    if ($null -eq $pwCreds) {
+        Add-Finding WARN 'SAM secret' `
+            "Could not read CIPP-SAM credentials, so expiry runway was NOT checked. $(Get-AzErrorSummary 120)" `
+            'Run as a user in CIPP-Azure-Admins, or grant the automation Graph Application.Read.All.'
+    }
+
     if ($null -ne $pwCreds) {
         $live = @($pwCreds | Where-Object { [datetime]$_.endDateTime -gt [datetime]::UtcNow })
         $dead = @($pwCreds).Count - $live.Count
@@ -323,6 +335,11 @@ if ($appId) {
             Add-Finding WARN 'Credential hygiene' "$($live.Count) live client secrets on CIPP-SAM (expected 1-2)." `
                 'Each one is a full CSP-privileged credential. Delete every key-id CIPP is not using.'
         }
+    }
+
+    if ($null -eq $certCreds) {
+        Add-Finding WARN 'SAM certificate' 'Could not read certificate credentials, so expiry was NOT checked.' `
+            'Same cause as the SAM secret finding above.'
     }
 
     if ($null -ne $certCreds -and @($certCreds).Count -gt 0) {
