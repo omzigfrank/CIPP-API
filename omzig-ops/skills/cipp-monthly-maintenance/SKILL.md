@@ -59,7 +59,7 @@ Work criticals before warnings. Consult the runbook section for each finding.
 - Clone the forks and test-merge locally to enumerate sync conflicts
 - Read logs, versions, deployment history
 
-**Get explicit approval from Frank first:**
+**Needs a second operator (irreversible but mechanical):**
 
 - Deleting any app-registration credential (irreversible, values unrecoverable)
 - Merging a sync PR or pushing to either fork — this deploys to production
@@ -67,7 +67,7 @@ Work criticals before warnings. Consult the runbook section for each finding.
 - Anything touching GDAP, tenant onboarding, or CIPP standards
 - Anything that reaches into a customer tenant
 
-**Escalate to Frank without acting:**
+**Owner decision — surface it, do not act:**
 
 - The SAM refresh token has expired — needs an interactive wizard run, not a script
 - A merge conflict you cannot confidently classify
@@ -79,7 +79,7 @@ Versions live in the repos, not Azure: `version_latest.txt` (backend) and
 `public/version.json` (frontend). The health check compares fork against upstream. When
 behind, the cause is nearly always a conflicted `pull[bot]` sync PR — enumerate the
 conflicts locally (runbook §6), classify each against the resolution policy, and present
-Frank a plan. **Never merge without approval.** Upgrade backend and frontend together.
+the operator a plan. **A clean sync PR that passes QC is pre-authorised to merge; a conflicted one needs a second pair of eyes.** Upgrade backend and frontend together.
 
 ### 5. Close out
 

@@ -4,6 +4,10 @@ CIPP is the portal at <https://management.omzig.it>. It is how Omzig administers
 every client's Microsoft 365 tenant. When CIPP is down, we cannot touch any client
 tenant — so it matters more than its size suggests.
 
+> **If CIPP is down right now, go to [OUTAGE.md](OUTAGE.md).** It is a triage tree
+> you are pre-authorised to work through end to end, including rotating the secret.
+> Come back here afterwards.
+
 This page gets you from nothing to competent in about 30 minutes. Work through it
 in order. You do not need to read the runbook first.
 
@@ -11,7 +15,7 @@ in order. You do not need to read the runbook first.
 
 ## Before you start
 
-Ask Frank to confirm you are in one of these Entra groups. Nothing below works
+Confirm you are in one of these Entra groups (ask the secondary or the owner). Nothing below works
 without it.
 
 | Group | What it lets you do |
@@ -107,21 +111,33 @@ judgement calls.
 1. **Never change a credential in an app setting.** Every credential setting is a
    Key Vault reference. Change the vault; a restart picks it up. Pasting a literal
    value silently breaks all future rotation.
-2. **Never delete an app-registration credential without Frank's sign-off.** Each
-   one is a fully privileged credential for every client tenant, and deletion is
-   irreversible.
+2. **Never delete an app-registration credential alone.** Each one is a fully
+   privileged credential for every client tenant and deletion is unrecoverable, so
+   it takes two operators: one proposes, another confirms in the ticket. Never
+   during an outage — it fixes nothing.
 3. **Never delete or disable `CIPPServiceAccount@omzig.it`.** It probably minted
    CIPP's refresh token, which is bound to the account that authorised it.
    Removing it would likely cut CIPP off from every client.
 
-## Escalate to Frank, do not improvise
+## What you can decide yourself
 
-- The refresh token has expired (needs an interactive wizard, not a script)
-- An upstream sync conflict you cannot confidently classify
-- Anything touching GDAP, tenant onboarding, CIPP standards, or a client tenant
-- Anything the runbook does not cover
+Most things. The full table is §3 of the runbook, but the short version:
 
-## If Frank is unavailable
+- **Just do it, and log it:** rotate the secret (even mid-outage), restart or roll
+  back an app, re-enable a vault secret, merge a clean sync PR.
+- **Get a second operator:** anything irreversible but mechanical, such as deleting
+  a credential that is not in use.
+- **Owner decision:** GDAP, client tenants, standards, granting access, Key Vault
+  purge protection.
+
+The refresh-token fix needs a Global Administrator rather than an operator —
+Courtney holds it. That is an access boundary, not an approval one.
+
+If you hit something the runbook does not cover, escalate with the evidence
+package from OUTAGE.md — and once it is solved, **add it to the runbook** so the
+next person does not have to escalate at all.
+
+## If the owner is unavailable
 
 Courtney is in `CIPP-Azure-Admins` and is a `CIPP-SAM` owner, so she can rotate
 the secret without any directory role. If neither is reachable, any Global

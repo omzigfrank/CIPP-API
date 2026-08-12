@@ -3,6 +3,10 @@
 **Owner:** Frank Diaz · **Audience:** Omzig engineers with CIPP admin
 **Last verified against the live instance:** 2026-08-12
 
+> **CIPP down right now? Go to [OUTAGE.md](OUTAGE.md).** It is a triage tree you
+> are pre-authorised to work through end to end. This runbook is the reference —
+> read it when you have time, not when the portal is red.
+
 This runbook covers the self-hosted CIPP instance at **https://management.omzig.it**.
 It is designed to be run *with Claude Code* — see [Running it with Claude](#running-it-with-claude).
 Every command here has been executed against the live instance.
@@ -123,7 +127,55 @@ the first role to remove.
 
 ---
 
-## 3. The monthly pass
+## 3. Who decides what
+
+Escalation is to a **role**, never to a person. The aim is that an operator can
+resolve any known fault without phoning anyone.
+
+| Role | Who | Reached for |
+| --- | --- | --- |
+| Operator | Courtney, Eric, Tony | Everything in OUTAGE.md and the monthly pass |
+| Secondary | Courtney | A second opinion; anything needing a Global Admin |
+| Owner | Frank | Business decisions and novel faults only |
+
+### Pre-authorised — do not ask, just do it and log it
+
+These are reversible or additive. Waiting for approval costs more than acting.
+
+- Rotate the SAM client secret, including during an outage
+- Start, restart, or roll back an app to a previous commit
+- Re-enable a disabled Key Vault secret
+- Set expiry metadata on a vault secret
+- Merge an upstream sync PR that merges cleanly and passes the QC workflow
+- Enable HTTPS-only or raise a TLS minimum
+- Add a finding you solved to this runbook
+
+### Two operators, not a manager
+
+Irreversible but mechanical. The safeguard is a second pair of eyes, not seniority:
+one operator proposes, another confirms in the ticket, then either may execute.
+
+- Deleting an app-registration credential that is **not** the one in
+  `applicationsecret` and **not** the designated spare
+- Deleting a stale sync branch or closing a stale sync PR
+- Resolving an upstream conflict in a file we have patched, where the resolution
+  policy in §7 gives a clear case
+
+### Owner decisions — genuinely Frank's
+
+Not because they are hard, but because they change policy, cost, or blast radius.
+
+- Anything touching GDAP, tenant onboarding, standards, or a client tenant
+- Enabling Key Vault purge protection (irreversible once on)
+- Granting a new person access, or widening a role
+- Changing directory roles on `CIPPServiceAccount@omzig.it`
+- A conflict that falls into §6 case 5 after a second operator has also looked
+
+> **Status: awaiting Frank's one-time sign-off.** Until he confirms this table, the
+> old behaviour stands and operators ask first. The point of writing it down is
+> that he approves the *rules* once instead of being called per incident.
+
+## 4. The monthly pass
 
 Budget 20 minutes when everything is green, up to 90 when a sync PR is conflicted.
 
@@ -151,7 +203,7 @@ It prints one table of findings and sets an exit code: `0` all green, `1` warnin
 12. HTTPS-only and min-TLS on both apps
 13. 24h auth-error count from Log Analytics, compared against the last rotation time
 
-Then work the findings top-down. Sections 4–7 below are the fixes.
+Then work the findings top-down. Sections 5–8 below are the fixes.
 
 ### What the unattended check does and does not cover
 
@@ -181,7 +233,7 @@ findings deferred and why.
 
 ---
 
-## 4. Fix: expired SAM client secret (`AADSTS7000222`)
+## 5. Fix: expired SAM client secret (`AADSTS7000222`)
 
 **Symptom.** Every CIPP page shows a red banner:
 
@@ -210,7 +262,7 @@ days out and check 4 fails the moment auth actually breaks.
 
 ---
 
-## 5. Fix: version drift
+## 6. Fix: version drift
 
 Versions live in the repos, not in Azure:
 
@@ -227,7 +279,7 @@ curl -s https://raw.githubusercontent.com/KelvinTegelaar/CIPP/main/public/versio
 ```
 
 If a version is behind, the cause is almost always a **conflicted `pull[bot]` sync PR** —
-see section 6. Once the sync PR merges, the GitHub Action deploys automatically; confirm
+see section 7. Once the sync PR merges, the GitHub Action deploys automatically; confirm
 with:
 
 ```bash
@@ -239,7 +291,7 @@ calls backend endpoints that may not exist in an older API.
 
 ---
 
-## 6. Unblocking a conflicted sync PR
+## 7. Unblocking a conflicted sync PR
 
 This is the work that actually keeps CIPP current, and the reason it falls behind.
 
@@ -279,8 +331,10 @@ Same for the frontend with `omzigfrank/CIPP`, branch `main`, upstream branch `ma
    changes. Then open a follow-up to move it into an overlay/theme file.
 4. **A real feature overlay wedged into an upstream file.** Merge by hand, run the
    `omzig-qc` workflow, and open a ticket to extract it into `src/omzig/*`.
-5. **You cannot tell.** Stop. Escalate to Frank. Do not guess on the platform that runs
-   every customer tenant.
+5. **You cannot tell.** Do not guess on the platform that runs every customer
+   tenant — but do not stop either. Open the resolution as a PR with your reasoning,
+   and get a second operator to look. Only if you both remain unsure does it become
+   an owner decision.
 
 **Before you classify, check whether the path still exists upstream.** A conflict that
 looks like a feature collision is often just a file upstream relocated:
@@ -355,7 +409,7 @@ the live portal while the old URL still redirects correctly.
 
 ---
 
-## 7. Fix: other findings
+## 8. Fix: other findings
 
 ### Expired refresh token (90-day idle limit)
 
@@ -390,21 +444,23 @@ az ad app credential list --id a60c5cc5-707b-4152-8881-b60e25cf1a34 -o table
 az ad app credential delete --id a60c5cc5-707b-4152-8881-b60e25cf1a34 --key-id <keyId>
 ```
 
-Deletion is not reversible and the values cannot be recovered. **Frank approves the
-delete list before anything is removed.**
+Deletion is not reversible and the values cannot be recovered, so it takes **two
+operators**: one proposes the list, another confirms in the ticket. Keep the
+credential named in `applicationsecret` plus the designated spare; everything else
+goes. Never do this during an outage — it fixes nothing.
 
 ### Open hardening items
 
 | Item | Status | Fix |
 | --- | --- | --- |
 | `cippwemix` HTTPS-only | ~~off~~ **enabled 2026-08-12** | — |
-| Key Vault purge protection | off | Enable — it is irreversible once on, so confirm with Frank |
+| Key Vault purge protection | off | Owner decision — irreversible once enabled |
 | Key Vault authorization | access policies, not RBAC | Migrate to RBAC when convenient |
 | Key Vault public network access | Enabled | Acceptable while the apps are not VNet-integrated |
 
 ---
 
-## 8. Running it with Claude
+## 9. Running it with Claude
 
 The whole pass is wrapped in a Claude Code skill, so a tech does not have to remember any
 of this:
@@ -441,7 +497,7 @@ Exit code `2` is the signal to page someone.
 
 ---
 
-## 9. Branding
+## 10. Branding
 
 The portal follows the **omzig.ai brand sheet v1** (August 2026), in
 `05 Marketing/Media/omzig.ai/Omzig Branding Sheet.pdf`. Tokens live in the
@@ -465,9 +521,9 @@ Two items are pending a marketing decision, not a code change: the tagline's
 brand colors are AA rather than AAA, and the supplied circle icon's ground is
 `#1A2436` rather than the sheet's Ink.
 
-## 10. Change log
+## 11. Change log
 
 | Date | Who | What |
 | --- | --- | --- |
-| 2026-08-12 | Frank + Claude | **Rebrand:** applied omzig.ai brand sheet v1 across the frontend (86 files) and swept the retired mark from the API overlay (28 files). Retired the `#3088C8` palette and the all-caps macron mark; Space Grotesk + Calibri; live-text wordmark; icons regenerated. Fixed three contrast defects found by measuring: white-on-Electric primary labels, a focus ring that would have failed on white, and footer opacity that had one line at 2.95:1 (below AA). Verified with a real Node 22.22.0 production build (exit 0, 1244-file export, retired mark absent from all built output). Frontend `7fdf9a10`, API `9baec3911`. See §9. |
-| 2026-08-12 | Frank + Claude | **Outage fixed:** rotated the expired CIPP-SAM secret (`AADSTS7000222`, expired 2026-07-22), verified end-to-end. **Upgraded 10.7.5/10.7.3 → 10.8.3** on both forks and both Azure targets; resolved all 6 sync conflicts (§6); both deploy Actions succeeded; post-upgrade health check all green. **Credential cleanup:** deleted 23 unused CIPP-SAM secrets (22 `CIPPInstall` + 1 expired), keeping the in-use secret and `CIPP-SAM-Secret` as a spare; re-verified auth after. Enabled HTTPS-only on `cippwemix`. Set `SSOAppSecret` expiry metadata to match CIPP-SSO's real credential (2028-06-15). Added `CIPP_KV_NAME=kv-omzig-cipp-dev` to `func-omzig-cipp-dev`. Registered the scheduled monthly check (1st of month, 09:00 local). Established this runbook, `Invoke-CippHealthCheck.ps1`, `Invoke-CippSecretRotation.ps1`, and the `/cipp-monthly-maintenance` skill. **Found still open:** the backend `Omzig Upstream Sync` workflow has `TARGET_BRANCH: main` but the repo's default branch is `master`, so it has failed every run since ≥2026-07-13. |
+| 2026-08-12 | Frank + Claude | **Rebrand:** applied omzig.ai brand sheet v1 across the frontend (86 files) and swept the retired mark from the API overlay (28 files). Retired the `#3088C8` palette and the all-caps macron mark; Space Grotesk + Calibri; live-text wordmark; icons regenerated. Fixed three contrast defects found by measuring: white-on-Electric primary labels, a focus ring that would have failed on white, and footer opacity that had one line at 2.95:1 (below AA). Verified with a real Node 22.22.0 production build (exit 0, 1244-file export, retired mark absent from all built output). Frontend `7fdf9a10`, API `9baec3911`. See §10. |
+| 2026-08-12 | Frank + Claude | **Outage fixed:** rotated the expired CIPP-SAM secret (`AADSTS7000222`, expired 2026-07-22), verified end-to-end. **Upgraded 10.7.5/10.7.3 → 10.8.3** on both forks and both Azure targets; resolved all 6 sync conflicts (§7); both deploy Actions succeeded; post-upgrade health check all green. **Credential cleanup:** deleted 23 unused CIPP-SAM secrets (22 `CIPPInstall` + 1 expired), keeping the in-use secret and `CIPP-SAM-Secret` as a spare; re-verified auth after. Enabled HTTPS-only on `cippwemix`. Set `SSOAppSecret` expiry metadata to match CIPP-SSO's real credential (2028-06-15). Added `CIPP_KV_NAME=kv-omzig-cipp-dev` to `func-omzig-cipp-dev`. Registered the scheduled monthly check (1st of month, 09:00 local). Established this runbook, `Invoke-CippHealthCheck.ps1`, `Invoke-CippSecretRotation.ps1`, and the `/cipp-monthly-maintenance` skill. **Found still open:** the backend `Omzig Upstream Sync` workflow has `TARGET_BRANCH: main` but the repo's default branch is `master`, so it has failed every run since ≥2026-07-13. |

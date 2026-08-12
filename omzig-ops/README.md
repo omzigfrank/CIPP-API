@@ -1,10 +1,12 @@
 # omzig-ops — operating the Omzig CIPP instance
 
-Everything needed to keep <https://management.omzig.it> healthy. Start with the
-runbook; the scripts do the work.
+Everything needed to keep <https://management.omzig.it> healthy.
+
+**Down right now? [OUTAGE.md](OUTAGE.md).** New to CIPP? [ONBOARDING.md](ONBOARDING.md).
 
 | File | What it is |
 | --- | --- |
+| [OUTAGE.md](OUTAGE.md) | **CIPP down? Start here.** Triage tree, pre-authorised end to end. |
 | [ONBOARDING.md](ONBOARDING.md) | **Start here if CIPP is new to you.** Nothing to competent in ~30 minutes. |
 | [CIPP-Monthly-Maintenance-Runbook.md](CIPP-Monthly-Maintenance-Runbook.md) | The document. Architecture, access, monthly pass, failure modes, escalation. |
 | [Invoke-CippHealthCheck.ps1](Invoke-CippHealthCheck.ps1) | 13 read-only checks. Exit `0` green, `1` warnings, `2` critical. Safe any time. |
