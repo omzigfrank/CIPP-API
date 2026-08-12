@@ -5,6 +5,7 @@ runbook; the scripts do the work.
 
 | File | What it is |
 | --- | --- |
+| [ONBOARDING.md](ONBOARDING.md) | **Start here if CIPP is new to you.** Nothing to competent in ~30 minutes. |
 | [CIPP-Monthly-Maintenance-Runbook.md](CIPP-Monthly-Maintenance-Runbook.md) | The document. Architecture, access, monthly pass, failure modes, escalation. |
 | [Invoke-CippHealthCheck.ps1](Invoke-CippHealthCheck.ps1) | 13 read-only checks. Exit `0` green, `1` warnings, `2` critical. Safe any time. |
 | [Invoke-CippSecretRotation.ps1](Invoke-CippSecretRotation.ps1) | Fixes `AADSTS7000222`. Verifies the new secret before storing it. `-WhatIf` supported. |
