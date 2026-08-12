@@ -80,12 +80,34 @@ function Add-Finding {
     })
 }
 
+$script:LastAzError = ''
+
 function Invoke-Az {
-    <# az CLI wrapper: returns parsed JSON, or $null on failure instead of throwing. #>
+    <# az CLI wrapper: returns parsed JSON, or $null on failure instead of throwing.
+       Keeps stderr in $script:LastAzError so callers can tell a permission problem
+       apart from a genuinely missing resource. #>
     param([Parameter(Mandatory)][string[]]$Arguments)
-    $raw = & az @Arguments -o json 2>$null
-    if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($raw)) { return $null }
-    try { return $raw | ConvertFrom-Json } catch { return $null }
+    $script:LastAzError = ''
+    $errFile = [System.IO.Path]::GetTempFileName()
+    try {
+        $raw = & az @Arguments -o json 2>$errFile
+        if ($LASTEXITCODE -ne 0 -or [string]::IsNullOrWhiteSpace($raw)) {
+            $script:LastAzError = (Get-Content $errFile -Raw -ErrorAction SilentlyContinue)
+            return $null
+        }
+        try { return $raw | ConvertFrom-Json } catch { return $null }
+    } finally {
+        Remove-Item $errFile -ErrorAction SilentlyContinue
+    }
+}
+
+function Test-AzAuthError {
+    <# True when the last az call failed for lack of permission rather than absence.
+       Reporting "cippwemix not found" at CRITICAL when the caller simply lacks a
+       role sends people hunting a deleted resource that is sitting right there. #>
+    [OutputType([bool])]
+    param()
+    return [bool]($script:LastAzError -match 'AuthorizationFailed|does not have authorization|Forbidden|\(403\)')
 }
 
 function Get-DaysUntil {
@@ -117,7 +139,12 @@ Add-Finding INFO 'Azure context' "Signed in as $($account.user.name) on '$($acco
 foreach ($app in @($ApiApp, $ProcessorApp)) {
     $site = Invoke-Az @('functionapp', 'show', '-g', $ResourceGroup, '-n', $app)
     if (-not $site) {
-        Add-Finding CRITICAL 'Function app' "$app not found or unreadable." 'Verify the app still exists.'
+        if (Test-AzAuthError) {
+            Add-Finding WARN 'Function app' "$app is not readable with your current permissions." `
+                'Ask an admin to add you to CIPP-Azure-Operators.'
+        } else {
+            Add-Finding CRITICAL 'Function app' "$app not found." 'Verify the app still exists.'
+        }
         continue
     }
     if ($site.state -eq 'Running') {
@@ -141,7 +168,16 @@ $settings = Invoke-Az @('functionapp', 'config', 'appsettings', 'list', '-g', $R
 $vaultSecrets = Invoke-Az @('keyvault', 'secret', 'list', '--vault-name', $VaultName)
 
 if (-not $settings) {
-    Add-Finding CRITICAL 'App settings' "Cannot read app settings on $ApiApp." 'Check RBAC.'
+    if (Test-AzAuthError) {
+        # Listing app settings is Microsoft.Web/sites/config/list/action — an ACTION,
+        # which the built-in Reader role (*/read) does not grant. That is why
+        # CIPP-Azure-Operators also carries the CIPP App Settings Reader custom role.
+        Add-Finding WARN 'App settings' `
+            "Cannot list app settings on $ApiApp — your role lacks Microsoft.Web/sites/config/list/action." `
+            'Confirm you are in CIPP-Azure-Operators, which carries the CIPP App Settings Reader role.'
+    } else {
+        Add-Finding CRITICAL 'App settings' "Cannot read app settings on $ApiApp." 'Check RBAC.'
+    }
 } elseif (-not $vaultSecrets) {
     Add-Finding CRITICAL 'Key Vault' "Cannot list secrets in vault '$VaultName'." 'Check your Key Vault access.'
 } else {
