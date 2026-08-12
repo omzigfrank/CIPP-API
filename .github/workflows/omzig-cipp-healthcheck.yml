@@ -1,0 +1,98 @@
+# Scheduled CIPP health check.
+#
+# Replaces the version that ran on Frank's laptop and reported into his chat: this
+# runs whether or not anyone is at a desk, and its findings land on an issue the
+# whole team can see.
+#
+# Authenticates via GitHub OIDC federated identity — there is NO client secret in
+# this repo. The service principal (CIPP-HealthCheck-Reader) holds only Reader on
+# resource group CIPP and secret get/list on the vault, so a compromised workflow
+# cannot change anything. It deliberately cannot rotate: that stays with a human
+# in CIPP-Azure-Admins.
+name: Omzig CIPP Health Check
+
+on:
+  schedule:
+    - cron: '0 13 1 * *' # 1st of the month, 13:00 UTC (09:00 ET)
+  workflow_dispatch:
+
+permissions:
+  id-token: write # required for OIDC
+  contents: read
+  issues: write # to file findings
+
+jobs:
+  healthcheck:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Azure login (OIDC, no secret)
+        uses: azure/login@v2
+        with:
+          client-id: 582c5539-263e-4cb3-9956-7a486c92cc1a
+          tenant-id: b7060bc5-9f4b-4c46-9639-1c408bf1d6f9
+          subscription-id: 48019666-dd78-439e-9890-030ab5156f23
+
+      - name: Run health check
+        id: check
+        shell: pwsh
+        run: |
+          # -SkipGitHub is NOT passed: version drift and stalled sync PRs are
+          # exactly what an unattended run should catch.
+          $out = & ./omzig-ops/Invoke-CippHealthCheck.ps1 -Json 2>&1 | Out-String
+          $code = $LASTEXITCODE
+          "exitcode=$code" >> $env:GITHUB_OUTPUT
+          $out | Out-File -FilePath findings.json -Encoding utf8
+          Write-Host $out
+          # Never fail the job on findings — a red X every month trains people to
+          # ignore it. The issue is the signal.
+          exit 0
+
+      - name: File an issue when anything needs attention
+        if: steps.check.outputs.exitcode != '0'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const fs = require('fs');
+            let findings = [];
+            try { findings = JSON.parse(fs.readFileSync('findings.json', 'utf8')); } catch (e) {}
+            if (!Array.isArray(findings)) findings = [findings];
+
+            const bad = findings.filter(f => f.Severity === 'CRITICAL' || f.Severity === 'WARN');
+            const crit = bad.filter(f => f.Severity === 'CRITICAL');
+            const stamp = new Date().toISOString().slice(0, 10);
+
+            const rows = bad.map(f =>
+              `| ${f.Severity} | ${f.Check} | ${f.Detail} | ${f.Action || ''} |`).join('\n');
+
+            const body = [
+              `Scheduled health check on ${stamp} exited \`${{ steps.check.outputs.exitcode }}\`.`,
+              '',
+              `**${crit.length} critical, ${bad.length - crit.length} warning.**`,
+              '',
+              '| Severity | Check | Detail | Action |',
+              '| --- | --- | --- | --- |',
+              rows,
+              '',
+              'Runbook: [omzig-ops/CIPP-Monthly-Maintenance-Runbook.md](../blob/master/omzig-ops/CIPP-Monthly-Maintenance-Runbook.md)',
+              '',
+              'Rotation and credential deletion need a human in `CIPP-Azure-Admins` —',
+              'this workflow is read-only by design.',
+            ].join('\n');
+
+            await github.rest.issues.create({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              title: `CIPP health check ${stamp} — ${crit.length} critical, ${bad.length - crit.length} warning`,
+              body,
+              labels: crit.length ? ['cipp-health', 'critical'] : ['cipp-health'],
+            });
+
+      - name: Keep the findings as an artifact
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: cipp-health-findings
+          path: findings.json
+          retention-days: 90
