@@ -470,17 +470,17 @@ of this:
 ```
 
 Claude runs the health check, explains each finding in plain language, and applies the
-fixes it is allowed to apply. From `C:\Users\FrankDiaz\OneDrive - Omzig, Inc\Dev`.
+fixes it is allowed to apply. Run it from your clone of `omzigfrank/CIPP-API`.
 
 **Claude may do without asking:** run the health check; rotate the SAM client secret;
 restart the function apps; set HTTPS-only and TLS minimums; add expiry metadata to vault
 secrets; enumerate sync-PR conflicts locally; report versions.
 
-**Claude must get Frank's approval first:** deleting any app-registration credential;
+**Claude must get a second operator's confirmation first:** deleting any app-registration credential;
 merging a sync PR or pushing to either fork; enabling Key Vault purge protection; any
 change to GDAP, tenant onboarding, or CIPP standards; anything touching a customer tenant.
 
-**Escalate to Frank, do not improvise:** the refresh token has expired; a conflict falls
+**Surface to a human, do not improvise:** the refresh token has expired (needs a Global Admin — Courtney or Frank; an access boundary, not an approval); a conflict falls
 into case 4; the health check reports something this runbook does not cover.
 
 ### To schedule it
