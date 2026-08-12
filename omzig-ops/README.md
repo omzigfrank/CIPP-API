@@ -11,7 +11,7 @@ Everything needed to keep <https://management.omzig.it> healthy.
 | [CIPP-Monthly-Maintenance-Runbook.md](CIPP-Monthly-Maintenance-Runbook.md) | The document. Architecture, access, monthly pass, failure modes, escalation. |
 | [Invoke-CippHealthCheck.ps1](Invoke-CippHealthCheck.ps1) | 13 read-only checks. Exit `0` green, `1` warnings, `2` critical. Safe any time. |
 | [Invoke-CippSecretRotation.ps1](Invoke-CippSecretRotation.ps1) | Fixes `AADSTS7000222`. Verifies the new secret before storing it. `-WhatIf` supported. |
-| [skills/cipp-monthly-maintenance](skills/cipp-monthly-maintenance) | Claude Code skill — `/cipp-monthly-maintenance` drives the whole pass. |
+| [skills/cipp](skills/cipp) | Claude Code skill — `/cipp` routes outage / monthly / onboarding. |
 
 ## First run
 
@@ -22,9 +22,9 @@ az login
 pwsh -File "./omzig-ops/Invoke-CippHealthCheck.ps1"
 ```
 
-To get the Claude skill, copy `omzig-ops/skills/cipp-monthly-maintenance` into
+To get the Claude skill, copy `omzig-ops/skills/cipp` into
 `.claude/skills/` in whatever directory you work from, then type
-`/cipp-monthly-maintenance`.
+`/cipp`.
 
 ## Who can do what
 

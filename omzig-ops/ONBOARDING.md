@@ -100,8 +100,8 @@ The runbook is `omzig-ops/CIPP-Monthly-Maintenance-Runbook.md`. It is the
 reference — architecture, every failure mode, escalation rules.
 
 **You can also just ask Claude Code.** From the repo, copy
-`omzig-ops/skills/cipp-monthly-maintenance` into `.claude/skills/`, then type
-`/cipp-monthly-maintenance` and it will drive the pass with you, including the
+`omzig-ops/skills/cipp` into `.claude/skills/`, then type
+`/cipp` and it will drive the pass with you, including the
 judgement calls.
 
 ---
