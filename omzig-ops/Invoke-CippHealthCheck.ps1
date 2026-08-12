@@ -146,8 +146,27 @@ if ($account.id -ne $Subscription) {
 Add-Finding INFO 'Azure context' "Signed in as $($account.user.name) on '$($account.name)'."
 
 # ------------------------------------------------------- 2. Function app run state
+# NB: read the site through ARM rather than `az functionapp show`. The CLI wrapper
+# makes extra calls beyond reading the resource (publishing credentials among
+# them), so it fails for a principal holding only Reader — which is exactly what
+# the operators group and the scheduled service principal hold. A plain GET needs
+# only Microsoft.Web/sites/read, which */read covers.
+function Get-CippSite {
+    param([Parameter(Mandatory)][string]$Name)
+    $base = "https://management.azure.com/subscriptions/$Subscription/resourceGroups/$ResourceGroup/providers/Microsoft.Web/sites/$Name"
+    $site = Invoke-Az @('rest', '--method', 'GET', '--url', "$base`?api-version=2023-12-01")
+    if (-not $site) { return $null }
+    # minTlsVersion lives on /config/web, not the site object. Also a plain read.
+    $web = Invoke-Az @('rest', '--method', 'GET', '--url', "$base/config/web?api-version=2023-12-01")
+    return [pscustomobject]@{
+        state      = $site.properties.state
+        httpsOnly  = $site.properties.httpsOnly
+        siteConfig = [pscustomobject]@{ minTlsVersion = $web.properties.minTlsVersion }
+    }
+}
+
 foreach ($app in @($ApiApp, $ProcessorApp)) {
-    $site = Invoke-Az @('functionapp', 'show', '-g', $ResourceGroup, '-n', $app)
+    $site = Get-CippSite -Name $app
     if (-not $site) {
         if (Test-AzAuthError) {
             Add-Finding WARN 'Function app' "$app not readable: $(Get-AzErrorSummary)" `
