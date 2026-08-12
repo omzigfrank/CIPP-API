@@ -31,7 +31,7 @@ function Start-OmzigUpdateInstall {
         throw 'The GitHub integration is not configured. Add a PAT with repo + workflow scope for the fork repositories under CIPP Settings > Integrations > GitHub, then try again.'
     }
 
-    # ŌMZIG audit #1 (governance): only the stable channel — a published
+    # omzig.ai audit #1 (governance): only the stable channel — a published
     # upstream release — may install directly. prerelease/dev carry unreviewed
     # code and are always routed through a review PR. The workflow enforces
     # this authoritatively; we coerce here too so the dispatch inputs are honest.

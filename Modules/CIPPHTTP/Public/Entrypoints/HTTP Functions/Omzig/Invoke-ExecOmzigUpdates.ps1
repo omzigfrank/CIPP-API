@@ -5,7 +5,7 @@ function Invoke-ExecOmzigUpdates {
     .ROLE
         CIPP.Core.ReadWrite
     .DESCRIPTION
-        ŌMZIG Update Center actions. Access to the write actions is restricted
+        omzig.ai Update Center actions. Access to the write actions is restricted
         to members of the configured Entra updater group (server-side,
         independent of CIPP roles — see Test-OmzigUpdateAuthorized); the coarse
         CIPP.Core.ReadWrite role is only a floor. Body.Action selects:
@@ -43,7 +43,7 @@ function Invoke-ExecOmzigUpdates {
                 $Roles = Get-CIPPAccessRole -Request $Request
                 if ($Roles -notcontains 'superadmin') {
                     $AuthzDenied = $true
-                    throw 'Only a superadmin may change the ŌMZIG updater group.'
+                    throw 'Only a superadmin may change the omzig.ai updater group.'
                 }
                 $GroupParams = @{ GroupId = [string]$Request.Body.groupId }
                 if ($Request.Body.groupName) { $GroupParams.GroupName = [string]$Request.Body.groupName }

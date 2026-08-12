@@ -1,7 +1,7 @@
 function Test-OmzigUpdateAuthorized {
     <#
     .SYNOPSIS
-    Is this caller allowed to trigger ŌMZIG update installs / schedule changes?
+    Is this caller allowed to trigger omzig.ai update installs / schedule changes?
 
     .DESCRIPTION
     Authorization for the write actions of the Update Center is restricted to
@@ -31,7 +31,7 @@ function Test-OmzigUpdateAuthorized {
         return [PSCustomObject]@{
             Authorized = $false
             GroupId    = $null
-            Reason     = 'No updater group is configured. A superadmin must set the ŌMZIG updater group before updates can be triggered.'
+            Reason     = 'No updater group is configured. A superadmin must set the omzig.ai updater group before updates can be triggered.'
         }
     }
 

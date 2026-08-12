@@ -1,7 +1,7 @@
 function Set-OmzigUpdaterGroup {
     <#
     .SYNOPSIS
-    Saves the ŌMZIG updater access group (superadmin action).
+    Saves the omzig.ai updater access group (superadmin action).
 
     .DESCRIPTION
     Persists the Entra security group whose members may trigger update

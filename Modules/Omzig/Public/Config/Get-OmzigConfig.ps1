@@ -4,7 +4,7 @@
     Returns the resolved Omzig portal configuration.
 
     .DESCRIPTION
-    Central configuration surface for the ŌMZIG overlay. Values come from
+    Central configuration surface for the omzig.ai overlay. Values come from
     environment variables (wired by Bicep app settings) with the confirmed
     spec defaults applied: Datto RMM platform pinned to Vidal (§17 item 4)
     and Autotask as the primary PSA provider (§7.14). No secrets live here —

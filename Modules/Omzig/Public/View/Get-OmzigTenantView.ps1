@@ -1,7 +1,7 @@
 ﻿function Get-OmzigTenantView {
     <#
     .SYNOPSIS
-    Assembles the ŌMZIG single-pane tenant view (§7.1): the Omzig tenant
+    Assembles the omzig.ai single-pane tenant view (§7.1): the Omzig tenant
     record fused with live PSA and Datto RMM signals plus the Client Health
     Score.
 

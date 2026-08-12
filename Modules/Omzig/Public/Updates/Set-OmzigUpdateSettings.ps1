@@ -1,7 +1,7 @@
 function Set-OmzigUpdateSettings {
     <#
     .SYNOPSIS
-    Saves the ŌMZIG scheduled-update settings and mirrors them to GitHub.
+    Saves the omzig.ai scheduled-update settings and mirrors them to GitHub.
 
     .DESCRIPTION
     Persists the settings to the OmzigUpdateSettings table, then (when the
@@ -32,7 +32,7 @@ function Set-OmzigUpdateSettings {
         [Parameter(Mandatory = $true)][ValidateSet('install', 'pr')][string]$Mode
     )
 
-    # ŌMZIG audit #1 (governance): scheduled prerelease/dev updates can never
+    # omzig.ai audit #1 (governance): scheduled prerelease/dev updates can never
     # install directly — they are always routed through a review PR. Coerce so
     # the mirrored repo variable the scheduled workflow reads is honest.
     if ($Channel -ne 'stable' -and $Mode -eq 'install') {

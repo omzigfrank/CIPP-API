@@ -1,4 +1,4 @@
-﻿# Pester suite for the ŌMZIG overlay module (QC pass 2, spec §13).
+﻿# Pester suite for the omzig.ai overlay module (QC pass 2, spec §13).
 # Self-contained: no network, no CIPP table storage — everything external is mocked.
 
 BeforeAll {

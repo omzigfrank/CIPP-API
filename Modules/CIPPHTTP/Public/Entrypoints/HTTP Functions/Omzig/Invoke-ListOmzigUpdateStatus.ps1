@@ -5,7 +5,7 @@ function Invoke-ListOmzigUpdateStatus {
     .ROLE
         CIPP.Core.Read
     .DESCRIPTION
-        ŌMZIG Update Center status: the local API version, the three update
+        omzig.ai Update Center status: the local API version, the three update
         channels resolved from CIPP's official GitHub (latest stable release,
         latest prerelease/beta, dev branch head), the saved auto-update
         schedule, and whether the GitHub integration needed for installs is

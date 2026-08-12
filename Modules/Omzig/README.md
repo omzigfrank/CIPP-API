@@ -1,10 +1,10 @@
-# ŌMZIG Overlay — CIPP-API Module
+# omzig.ai Overlay — CIPP-API Module
 
 All Omzig-specific backend logic lives in this module, per the overlay pattern
 in the Omzig Custom CIPP Build spec (§11.4): never patch upstream CIPP modules.
 Upstream touchpoints are carefully scoped:
 
-- `profile.ps1` carries two marked ŌMZIG overlay patches: (1) adds `Omzig` to the
+- `profile.ps1` carries two marked omzig.ai overlay patches: (1) adds `Omzig` to the
   core module import list; (2) an environment shim that maps
   `CIPP_STORAGE_CONNECTION_STRING` onto `AzureWebJobsStorage` at startup so
   isolated deployments keep platform storage identity-based while upstream code

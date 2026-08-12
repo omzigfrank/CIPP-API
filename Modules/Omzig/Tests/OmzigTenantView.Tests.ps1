@@ -1,4 +1,4 @@
-﻿# Pester suite for the ŌMZIG single-pane tenant view (spec §7.1).
+﻿# Pester suite for the omzig.ai single-pane tenant view (spec §7.1).
 # Self-contained: the Omzig tenant record, PSA and Datto RMM functions are all
 # mocked, so nothing here touches CIPP table storage or the network.
 

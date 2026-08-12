@@ -1,4 +1,4 @@
-﻿# Pester suite for the ŌMZIG quote engine surface (spec §3): the
+﻿# Pester suite for the omzig.ai quote engine surface (spec §3): the
 # Test-OmzigQuoteRequest validation helper and the two HTTP entrypoints that
 # expose the pricing floors and the quote evaluator. Self-contained: no
 # network, no CIPP table storage. Test-OmzigQuoteFloor and

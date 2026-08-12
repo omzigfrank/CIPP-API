@@ -1,7 +1,7 @@
 ﻿function Test-OmzigPreflight {
     <#
     .SYNOPSIS
-    Config-validation preflight for the ŌMZIG portal (§17 item 5).
+    Config-validation preflight for the omzig.ai portal (§17 item 5).
 
     .DESCRIPTION
     Validates that every integration the portal depends on is actually

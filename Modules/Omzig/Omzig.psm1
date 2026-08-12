@@ -1,4 +1,4 @@
-﻿# ŌMZIG overlay module loader — mirrors the CippExtensions source-mode loader.
+﻿# omzig.ai overlay module loader — mirrors the CippExtensions source-mode loader.
 # All Omzig-specific backend logic lives in this module (Omzig Custom CIPP
 # Build v1.1 §11.4 overlay pattern). Never patch upstream CIPP modules.
 $Public = @(Get-ChildItem -Path (Join-Path $PSScriptRoot 'Public\*.ps1') -Recurse -ErrorAction SilentlyContinue)

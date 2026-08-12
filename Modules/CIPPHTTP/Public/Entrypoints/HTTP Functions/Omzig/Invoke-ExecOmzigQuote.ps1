@@ -5,7 +5,7 @@
     .ROLE
         CIPP.Core.ReadWrite
     .DESCRIPTION
-        Evaluates a ŌMZIG AI product quote against the §3 pricing floors and
+        Evaluates a omzig.ai AI product quote against the §3 pricing floors and
         70% gross margin floor via Test-OmzigQuoteFloor. Accepts an optional
         Frank-signed executive override token; the signing key itself is only
         ever read from the OMZIG_OVERRIDE_SIGNING_KEY environment variable —

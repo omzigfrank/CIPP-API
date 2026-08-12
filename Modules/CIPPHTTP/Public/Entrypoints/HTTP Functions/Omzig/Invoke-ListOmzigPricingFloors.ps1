@@ -5,7 +5,7 @@
     .ROLE
         CIPP.Core.Read
     .DESCRIPTION
-        Returns the ŌMZIG AI product pricing floors (§3 / §7.7) that drive the
+        Returns the omzig.ai AI product pricing floors (§3 / §7.7) that drive the
         quote engine: per-product SMB price floor, recurring flag, gross
         margin floor and never-discounted flag.
     #>

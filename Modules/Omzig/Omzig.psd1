@@ -5,7 +5,7 @@
     Author            = 'Omzig, Inc.'
     CompanyName       = 'Omzig, Inc.'
     Copyright         = '(c) 2026 Omzig, Inc. All rights reserved.'
-    Description       = 'ŌMZIG overlay for CIPP-API: PSA abstraction (Autotask primary, HaloPSA stub), Datto RMM (Vidal), break-glass and GDAP sentinels, AI product pricing floors, Omzig tenant records and client health score.'
+    Description       = 'omzig.ai overlay for CIPP-API: PSA abstraction (Autotask primary, HaloPSA stub), Datto RMM (Vidal), break-glass and GDAP sentinels, AI product pricing floors, Omzig tenant records and client health score.'
     PowerShellVersion = '7.4'
     FunctionsToExport = @('*')
     CmdletsToExport   = @()

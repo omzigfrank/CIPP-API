@@ -5,7 +5,7 @@
     .ROLE
         Tenant.Administration.Read
     .DESCRIPTION
-        Returns the ŌMZIG single-pane tenant view (§7.1): the Omzig tenant
+        Returns the omzig.ai single-pane tenant view (§7.1): the Omzig tenant
         record fused with PSA ticket/contract summaries, Datto RMM
         device/alert counts and the Client Health Score.
     #>

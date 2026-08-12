@@ -1,4 +1,4 @@
-# ŌMZIG Update Center — install updates from CIPP's official GitHub.
+# omzig.ai Update Center — install updates from CIPP's official GitHub.
 #
 # Channels:
 #   stable     -> latest published release tag of KelvinTegelaar/CIPP-API
@@ -56,7 +56,7 @@ jobs:
 
       - name: Resolve channel and mode
         id: cfg
-        # ŌMZIG audit hardening: all external/variable inputs come in via env
+        # omzig.ai audit hardening: all external/variable inputs come in via env
         # and are referenced as quoted shell variables — never interpolated as
         # ${{ }} inside run: (which would allow command injection through a
         # crafted upstream tag or repo variable).
@@ -87,7 +87,7 @@ jobs:
           case "$CHANNEL" in stable|prerelease|dev) ;; *) echo "::error::Unknown channel '$CHANNEL'"; exit 1 ;; esac
           case "$MODE" in install|pr) ;; *) echo "::error::Unknown mode '$MODE'"; exit 1 ;; esac
 
-          # ŌMZIG audit #1 (governance): only the STABLE channel — a published
+          # omzig.ai audit #1 (governance): only the STABLE channel — a published
           # upstream release — may install directly to the deploy branch.
           # prerelease/dev carry unreviewed upstream code, so they are ALWAYS
           # routed through a review PR and never auto-deployed to production.
@@ -187,7 +187,7 @@ jobs:
             --base "${TARGET_BRANCH}" \
             --head "$BRANCH" \
             --title "chore: CIPP update — $REF ($CHANNEL)" \
-            --body "Update from \`${UPSTREAM_REPO}@$REF\` on the $CHANNEL channel, requested via the ŌMZIG Update Center. Review the overlay touchpoints before merging."
+            --body "Update from \`${UPSTREAM_REPO}@$REF\` on the $CHANNEL channel, requested via the omzig.ai Update Center. Review the overlay touchpoints before merging."
 
       - name: Open conflict issue
         if: steps.merge.outputs.state == 'conflicted'
@@ -199,5 +199,5 @@ jobs:
           gh issue create \
             --title "Update install conflict — $REF ($CHANNEL)" \
             --label 'upstream-sync' \
-            --body "Installing \`${UPSTREAM_REPO}@$REF\` hit merge conflicts and was aborted — nothing was deployed. Expected conflict surface: the marked ŌMZIG overlay touchpoints. Resolve locally and push, or run the weekly sync flow."
+            --body "Installing \`${UPSTREAM_REPO}@$REF\` hit merge conflicts and was aborted — nothing was deployed. Expected conflict surface: the marked omzig.ai overlay touchpoints. Resolve locally and push, or run the weekly sync flow."
           exit 1

@@ -1,7 +1,7 @@
 function Get-OmzigUpdateSettings {
     <#
     .SYNOPSIS
-    Reads the ŌMZIG scheduled-update settings.
+    Reads the omzig.ai scheduled-update settings.
 
     .DESCRIPTION
     Settings are persisted in the OmzigUpdateSettings table. The install

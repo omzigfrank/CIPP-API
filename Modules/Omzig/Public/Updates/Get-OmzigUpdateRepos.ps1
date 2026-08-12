@@ -1,7 +1,7 @@
 function Get-OmzigUpdateRepos {
     <#
     .SYNOPSIS
-    Repository map for the ŌMZIG Update Center.
+    Repository map for the omzig.ai Update Center.
 
     .DESCRIPTION
     Returns the fork repositories that receive updates, the upstream CIPP

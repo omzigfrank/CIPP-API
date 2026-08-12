@@ -1,7 +1,7 @@
 function Get-OmzigUpdaterGroup {
     <#
     .SYNOPSIS
-    Returns the configured ŌMZIG updater access group.
+    Returns the configured omzig.ai updater access group.
 
     .DESCRIPTION
     Only members of this Entra security group may trigger update installs or

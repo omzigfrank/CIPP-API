@@ -1,7 +1,7 @@
 function Get-OmzigUpdateChannels {
     <#
     .SYNOPSIS
-    Resolves the three ŌMZIG update channels from CIPP's official GitHub.
+    Resolves the three omzig.ai update channels from CIPP's official GitHub.
 
     .DESCRIPTION
     Queries KelvinTegelaar/CIPP and KelvinTegelaar/CIPP-API for:

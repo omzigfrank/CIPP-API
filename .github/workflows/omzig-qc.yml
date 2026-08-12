@@ -1,4 +1,4 @@
-# ŌMZIG QC gate (spec §13, passes 1-2 for the overlay module):
+# omzig.ai QC gate (spec §13, passes 1-2 for the overlay module):
 # PSScriptAnalyzer + Pester on Modules/Omzig for every PR that touches it.
 name: Omzig QC
 

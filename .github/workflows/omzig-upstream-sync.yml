@@ -1,4 +1,4 @@
-# ŌMZIG upstream sync (spec §11.4): weekly PR pulling KelvinTegelaar/CIPP-API
+# omzig.ai upstream sync (spec §11.4): weekly PR pulling KelvinTegelaar/CIPP-API
 # into the Omzig fork so we never fall off the CIPP release train.
 # Conflicts should only ever surface in the single marked overlay touchpoint
 # (profile.ps1).
@@ -89,4 +89,4 @@ jobs:
           gh issue create \
             --title "Upstream sync conflict — $(date -u +%Y-%m-%d)" \
             --label 'upstream-sync' \
-            --body "The weekly sync from \`${UPSTREAM_REPO}@${UPSTREAM_BRANCH}\` hit merge conflicts and needs a manual resolve. Expected conflict surface: the marked ŌMZIG overlay touchpoints. Run the sync locally, resolve, and open the PR by hand."
+            --body "The weekly sync from \`${UPSTREAM_REPO}@${UPSTREAM_BRANCH}\` hit merge conflicts and needs a manual resolve. Expected conflict surface: the marked omzig.ai overlay touchpoints. Run the sync locally, resolve, and open the PR by hand."

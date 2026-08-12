@@ -1,4 +1,4 @@
-# Pester suite for the ŌMZIG Update Center: channel resolution from CIPP's
+# Pester suite for the omzig.ai Update Center: channel resolution from CIPP's
 # official GitHub, schedule persistence + GitHub Actions variable mirroring,
 # on-demand install dispatch, and the two HTTP entrypoints. Self-contained:
 # every CIPP core / GitHub call is stubbed with controllable global functions
@@ -37,7 +37,7 @@ BeforeAll {
     # Access-control state: the configured updater group, the caller's group
     # memberships, and the caller's CIPP roles.
     $script:UPDATER_GROUP = '11111111-1111-1111-1111-111111111111'
-    $script:UpdaterGroupEntity = [PSCustomObject]@{ UpdaterGroupId = $script:UPDATER_GROUP; UpdaterGroupName = 'ŌMZIG Updaters' }
+    $script:UpdaterGroupEntity = [PSCustomObject]@{ UpdaterGroupId = $script:UPDATER_GROUP; UpdaterGroupName = 'omzig.ai Updaters' }
     $script:GroupMemberships = @($script:UPDATER_GROUP)  # caller is a member by default
     $script:CallerRoles = @('editor')                    # caller is a plain editor by default
 
@@ -309,7 +309,7 @@ Describe 'Start-OmzigUpdateInstall' {
 Describe 'Get/Set-OmzigUpdaterGroup and Test-OmzigUpdateAuthorized' {
     BeforeEach {
         $script:SavedEntities.Clear()
-        $script:UpdaterGroupEntity = [PSCustomObject]@{ UpdaterGroupId = $script:UPDATER_GROUP; UpdaterGroupName = 'ŌMZIG Updaters' }
+        $script:UpdaterGroupEntity = [PSCustomObject]@{ UpdaterGroupId = $script:UPDATER_GROUP; UpdaterGroupName = 'omzig.ai Updaters' }
         $script:GroupMemberships = @($script:UPDATER_GROUP)
     }
 
@@ -353,7 +353,7 @@ Describe 'Invoke-ListOmzigUpdateStatus (GET entrypoint)' {
         $script:ReleasesFixture = $script:ReleasesDefault
         $script:DevBranchFixture = $script:DevBranchDefault
         $script:UpdateSettingsEntity = $null
-        $script:UpdaterGroupEntity = [PSCustomObject]@{ UpdaterGroupId = $script:UPDATER_GROUP; UpdaterGroupName = 'ŌMZIG Updaters' }
+        $script:UpdaterGroupEntity = [PSCustomObject]@{ UpdaterGroupId = $script:UPDATER_GROUP; UpdaterGroupName = 'omzig.ai Updaters' }
         $script:GroupMemberships = @($script:UPDATER_GROUP)
         $script:CallerRoles = @('editor')
         $script:GitHubEnabled = $true
@@ -390,7 +390,7 @@ Describe 'Invoke-ExecOmzigUpdates (POST entrypoint)' {
         $script:GitHubCalls.Clear()
         $script:GitHubPatchFails = $false
         # Default caller: an editor who IS a member of the updater group.
-        $script:UpdaterGroupEntity = [PSCustomObject]@{ UpdaterGroupId = $script:UPDATER_GROUP; UpdaterGroupName = 'ŌMZIG Updaters' }
+        $script:UpdaterGroupEntity = [PSCustomObject]@{ UpdaterGroupId = $script:UPDATER_GROUP; UpdaterGroupName = 'omzig.ai Updaters' }
         $script:GroupMemberships = @($script:UPDATER_GROUP)
         $script:CallerRoles = @('editor')
         $script:MemberHeaders = @{ 'x-ms-client-principal' = (NewPrincipalHeader 'updater@omzig.it') }
