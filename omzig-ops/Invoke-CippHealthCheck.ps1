@@ -101,6 +101,16 @@ function Invoke-Az {
     }
 }
 
+function Get-AzErrorSummary {
+    <# One-line, truncated form of the last az error, so a finding names the actual
+       problem instead of just asserting one. #>
+    [OutputType([string])]
+    param([int]$MaxLength = 200)
+    $t = ($script:LastAzError -replace '\s+', ' ').Trim()
+    if ($t.Length -gt $MaxLength) { $t = $t.Substring(0, $MaxLength) + '...' }
+    return $t
+}
+
 function Test-AzAuthError {
     <# True when the last az call failed for lack of permission rather than absence.
        Reporting "cippwemix not found" at CRITICAL when the caller simply lacks a
@@ -140,10 +150,11 @@ foreach ($app in @($ApiApp, $ProcessorApp)) {
     $site = Invoke-Az @('functionapp', 'show', '-g', $ResourceGroup, '-n', $app)
     if (-not $site) {
         if (Test-AzAuthError) {
-            Add-Finding WARN 'Function app' "$app is not readable with your current permissions." `
+            Add-Finding WARN 'Function app' "$app not readable: $(Get-AzErrorSummary)" `
                 'Ask an admin to add you to CIPP-Azure-Operators.'
         } else {
-            Add-Finding CRITICAL 'Function app' "$app not found." 'Verify the app still exists.'
+            Add-Finding CRITICAL 'Function app' "$app not found. $(Get-AzErrorSummary)" `
+                'Verify the app still exists.'
         }
         continue
     }
@@ -173,7 +184,7 @@ if (-not $settings) {
         # which the built-in Reader role (*/read) does not grant. That is why
         # CIPP-Azure-Operators also carries the CIPP App Settings Reader custom role.
         Add-Finding WARN 'App settings' `
-            "Cannot list app settings on $ApiApp — your role lacks Microsoft.Web/sites/config/list/action." `
+            "Cannot list app settings on $ApiApp (needs Microsoft.Web/sites/config/list/action): $(Get-AzErrorSummary)" `
             'Confirm you are in CIPP-Azure-Operators, which carries the CIPP App Settings Reader role.'
     } else {
         Add-Finding CRITICAL 'App settings' "Cannot read app settings on $ApiApp." 'Check RBAC.'
