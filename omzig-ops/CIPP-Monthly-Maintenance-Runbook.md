@@ -171,9 +171,14 @@ Not because they are hard, but because they change policy, cost, or blast radius
 - Changing directory roles on `CIPPServiceAccount@omzig.it`
 - A conflict that falls into §6 case 5 after a second operator has also looked
 
-> **Status: awaiting Frank's one-time sign-off.** Until he confirms this table, the
-> old behaviour stands and operators ask first. The point of writing it down is
-> that he approves the *rules* once instead of being called per incident.
+> **Approved by Frank Diaz, 2026-08-12. These tiers are in force.**
+>
+> Operators do not need per-incident approval for anything in the pre-authorised
+> list, including rotating the secret during an outage. The two-operator tier
+> replaces owner approval for work that is irreversible but mechanical.
+>
+> Recorded by Claude on Frank's instruction — the approval is his; this wording is
+> the record of it, not the thing itself. Changing these tiers is an owner decision.
 
 ## 4. The monthly pass
 
