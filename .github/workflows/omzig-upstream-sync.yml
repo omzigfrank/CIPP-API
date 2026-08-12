@@ -1,7 +1,9 @@
 # omzig.ai upstream sync (spec §11.4): weekly PR pulling KelvinTegelaar/CIPP-API
 # into the Omzig fork so we never fall off the CIPP release train.
-# Conflicts should only ever surface in the single marked overlay touchpoint
-# (profile.ps1).
+# Conflicts surface wherever we have patched an upstream file -- not only in
+# profile.ps1, as this comment used to claim. The 2026-08-12 sync conflicted in
+# Modules/CIPPCore/Public/Get-CippKeyVaultName.ps1. See omzig-ops/ for the
+# resolution policy.
 name: Omzig Upstream Sync
 
 on:
@@ -22,7 +24,11 @@ permissions:
 env:
   UPSTREAM_REPO: KelvinTegelaar/CIPP-API
   UPSTREAM_BRANCH: master
-  TARGET_BRANCH: main
+  # The fork's default branch is master, not main. This said "main" from the
+  # start, so actions/checkout failed on every run from at least 2026-07-13
+  # and no sync PR was ever opened -- which is how the instance drifted three
+  # weeks behind without anyone noticing.
+  TARGET_BRANCH: master
 
 jobs:
   sync:
