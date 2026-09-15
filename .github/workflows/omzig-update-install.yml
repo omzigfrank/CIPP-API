@@ -148,6 +148,20 @@ jobs:
             exit 0
           fi
 
+          # Guard (incident 2026-07-13, docs/omzig-incident-2026-07-13.md):
+          # the canary merge cb9626f62 was reverted by db90d6ff1. Its commits
+          # (tip 8e421bfba) are still ancestors of master, so merging an
+          # upstream ref that contains them would SILENTLY SKIP those changes
+          # and deploy a half-old tree. Refuse until the revert is re-applied.
+          REVERTED_TIP='8e421bfba15fdb24b8639a3a56f3bed9529e257f'
+          REVERT_COMMIT='db90d6ff1d675c8a27cca28607101a9d61265bf8'
+          if git merge-base --is-ancestor "$REVERTED_TIP" FETCH_HEAD 2>/dev/null \
+            && git merge-base --is-ancestor "$REVERT_COMMIT" HEAD 2>/dev/null \
+            && ! git log --format=%s "${REVERT_COMMIT}..HEAD" | grep -Eq '^(Reapply|Revert "Revert) "?chore: install CIPP update'; then
+            echo "::error::Upstream ref '$REF' contains commits reverted by the 2026-07-13 canary rollback (${REVERT_COMMIT:0:9}). Merging now would silently skip them. Run: git revert ${REVERT_COMMIT:0:9} on ${TARGET_BRANCH}, then re-run this install. See docs/omzig-incident-2026-07-13.md."
+            exit 1
+          fi
+
           set +e
           git merge --no-edit FETCH_HEAD \
             -m "chore: install CIPP update — ${UPSTREAM_REPO}@$REF ($CHANNEL channel)"
