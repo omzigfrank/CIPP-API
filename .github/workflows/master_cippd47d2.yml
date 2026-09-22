@@ -31,4 +31,37 @@ jobs:
           slot-name: 'Production'
           package: ${{ env.AZURE_FUNCTIONAPP_PACKAGE_PATH }}
           publish-profile: ${{ secrets.AZURE_FUNCTIONAPP_PUBLISH_PROFILE }}
-          
+
+  # omzig.ai: the API moved to a Flex Consumption app (Linux, always-ready) on 2026-09-22.
+  # Packaged with git archive so Linux gets the repository's exact bytes (LF), which is
+  # what was load-tested. Signs in with a GitHub OIDC federated credential - there is
+  # no stored secret. The identity (CIPP-Deploy-GitHub-Flex) holds Website Contributor
+  # on cippwemix-flex only. The job above keeps the old Consumption app current as a
+  # rollback target until it is retired.
+  deploy-flex:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+
+    steps:
+      - name: 'Checkout GitHub Action'
+        uses: actions/checkout@v4
+
+      - name: 'Package (git archive)'
+        run: git archive --format=zip -o "$RUNNER_TEMP/cipp-api.zip" HEAD
+
+      - name: 'Azure login (OIDC, no secret)'
+        uses: azure/login@v2
+        with:
+          client-id: 9a4e5dce-aef6-4215-bc29-b73afacd1a1f
+          tenant-id: b7060bc5-9f4b-4c46-9639-1c408bf1d6f9
+          subscription-id: 48019666-dd78-439e-9890-030ab5156f23
+
+      - name: 'Deploy to cippwemix-flex'
+        uses: Azure/functions-action@v1
+        with:
+          app-name: 'cippwemix-flex'
+          package: ${{ runner.temp }}/cipp-api.zip
+          sku: flexconsumption
+          remote-build: false
