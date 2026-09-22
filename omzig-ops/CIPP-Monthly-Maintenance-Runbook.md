@@ -1,7 +1,7 @@
 # CIPP Monthly Maintenance Runbook
 
 **Owner:** Frank Diaz · **Audience:** Omzig engineers with CIPP admin
-**Last verified against the live instance:** 2026-08-12
+**Last verified against the live instance:** 2026-09-22 (Flex Consumption cutover)
 
 > **CIPP down right now? Go to [OUTAGE.md](OUTAGE.md).** It is a triage tree you
 > are pre-authorised to work through end to end. This runbook is the reference —
@@ -20,10 +20,13 @@ marketplace; every version bump comes through the forks.
 
 ```
 KelvinTegelaar/CIPP-API ──pull[bot]──► omzigfrank/CIPP-API (master)
-                                              │ GitHub Action
+                                              │ GitHub Action (deploy-flex job, OIDC)
                                               ▼
-                              cippwemix        (Function App — HTTP API)
-                              cippwemix-proc   (Function App — timers/queues/orchestrators)
+                              cippwemix-flex   (Flex Consumption, Linux, 4 GB / 2 cores:
+                                                HTTP API + timers + queues + orchestrators)
+
+                              cippwemix        (retired 2026-09-22, Stopped — rollback target)
+                              cippwemix-proc   (retired 2026-09-22, Stopped — rollback target)
 
 KelvinTegelaar/CIPP ──────pull[bot]──► omzigfrank/CIPP (main)
                                               │ GitHub Action
@@ -36,8 +39,10 @@ KelvinTegelaar/CIPP ──────pull[bot]──► omzigfrank/CIPP (main)
 | Subscription | `48019666-dd78-439e-9890-030ab5156f23` — *2025-26 MCPP Subscription* |
 | Tenant | `b7060bc5-9f4b-4c46-9639-1c408bf1d6f9` |
 | Resource group | `CIPP` (eastus2) |
-| API function app | `cippwemix` |
-| Processor function app | `cippwemix-proc` (`CIPP_PROCESSOR=true`) |
+| Function app (API **and** background) | `cippwemix-flex` — Flex Consumption, 1 always-ready HTTP instance |
+| Retired, Stopped (rollback only) | `cippwemix` (old API), `cippwemix-proc` (old processor, was stuck on 10.6.1) |
+| Deploy identity | `CIPP-Deploy-GitHub-Flex` (`9a4e5dce-…`), OIDC, Website Contributor on `cippwemix-flex` only |
+| Flex deployment packages | storage `cippflextest09222235` — named for the build test, now holds the live package; do not delete |
 | Static Web App | `cipp-swa-wemix` → `management.omzig.it` |
 | Key Vault | `cippwemix` |
 | Storage | `cippstgwemix` |
@@ -47,7 +52,7 @@ KelvinTegelaar/CIPP ──────pull[bot]──► omzigfrank/CIPP (main)
 ### The one architectural fact that matters
 
 **Key Vault `cippwemix` is the single source of truth for every CIPP credential.**
-All four credential app settings on `cippwemix` are Key Vault *references*, not literals:
+All four credential app settings on `cippwemix-flex` are Key Vault *references*, not literals:
 
 ```
 ApplicationSecret = @Microsoft.KeyVault(VaultName=cippwemix;SecretName=applicationsecret)
@@ -56,8 +61,9 @@ ApplicationId     = @Microsoft.KeyVault(VaultName=cippwemix;SecretName=applicati
 TenantId          = @Microsoft.KeyVault(VaultName=cippwemix;SecretName=tenantid)
 ```
 
-`cippwemix-proc` carries no credential settings at all — CIPP derives the vault name from
-the site name at runtime and reads it with the app's managed identity.
+CIPP normally derives the vault name from the app name. `cippwemix-flex` is not the
+vault's name, so the app carries `CIPP_KV_NAME=cippwemix`, which CIPP honours as an
+explicit override. Remove it and every secret lookup points at a vault that does not exist.
 
 Consequences:
 
@@ -78,7 +84,7 @@ is a single membership change.
 | `CIPP-Azure-Operators` | Courtney, Eric, Tony | Reader on RG `CIPP` | secret `get`, `list` | No |
 | `CIPP-Azure-Admins` | Frank, Courtney | Contributor on RG `CIPP` | secret `get`, `list`, `set` | Yes |
 
-Operators can run every one of the 13 checks, including the live token test.
+Operators can run every one of the 16 checks, including the live token test.
 They cannot change or delete anything — rotation and credential deletion need
 the admins group.
 
@@ -236,6 +242,16 @@ Two ways to close the gap; the second needs a decision, not a code change:
 Log in the Autotask ticket: date, who ran it, version before/after, findings fixed,
 findings deferred and why.
 
+**Then clear the alert backlog.** Open every issue labelled `cipp-health` in
+`omzigfrank/CIPP-API` and either fix it or write in it why not. An open CRITICAL is not
+a record, it is the job: issue #68 (2026-09-01) correctly reported the frontend sync as
+blocked and then sat untouched for three weeks while the frontend fell a full release
+behind the API.
+
+```bash
+gh issue list -R omzigfrank/CIPP-API -l cipp-health --state open
+```
+
 ---
 
 ## 5. Fix: expired SAM client secret (`AADSTS7000222`)
@@ -284,12 +300,13 @@ curl -s https://raw.githubusercontent.com/KelvinTegelaar/CIPP/main/public/versio
 ```
 
 If a version is behind, the cause is almost always a **conflicted `pull[bot]` sync PR** —
-see section 7. Once the sync PR merges, the GitHub Action deploys automatically; confirm
-with:
+see section 7. Once the sync PR merges, the GitHub Action deploys automatically.
 
-```bash
-az rest --method GET --url "https://management.azure.com/subscriptions/48019666-dd78-439e-9890-030ab5156f23/resourceGroups/CIPP/providers/Microsoft.Web/sites/cippwemix/deployments?api-version=2022-03-01" --query "value[0].properties.{time:end_time,active:active,msg:message}"
-```
+**The repo version is not proof of what is running.** For two months the repo said
+10.10.3 while `cippwemix-proc` ran 10.6.1, because no workflow ever deployed it. The
+health check's **Deployed version** line reads the version the app itself logs at
+startup; that is the number to trust. Flex keeps no Kudu deployment history, so the old
+`/deployments` query returns nothing for `cippwemix-flex`.
 
 **Upgrade backend and frontend together.** They share a version line and the frontend
 calls backend endpoints that may not exist in an older API.
@@ -379,6 +396,42 @@ curl -s "https://api.github.com/repos/omzigfrank/CIPP-API/actions/runs?per_page=
 Also note the workflow's header comment claims conflicts "should only ever surface in
 profile.ps1" — that is stale. The real conflict surface is any upstream file we patched.
 
+### 2026-09-22 — frontend 10.8.5 → 10.10.3, 9 conflicts
+
+Upstream renamed most of the frontend from `.js` to `.jsx` between 10.8 and 10.10, so
+**every branded upstream file conflicted at once**. None were hard; all were §7 case 2
+(upstream restructured, re-apply branding) or case 3 (pure branding).
+
+| File | Case | Resolution |
+| --- | --- | --- |
+| `src/layouts/top-nav.jsx` | 2 | Took upstream's layout: the logo now hides on phones in favour of the tenant chip. Kept our 112px wordmark in a 40px box, `ground="dark"`. Took upstream's mobile gutter fix over ours. |
+| `src/layouts/side-nav.jsx` | 2 | Upstream moved `PaperProps` to `slotProps.paper` and `BANNER_HEIGHT_VAR` into `CHROME_TOP_OFFSET`. Re-applied the liquid-glass rail inside the new structure. |
+| `src/layouts/mobile-nav.js` | 2 | **modify/delete:** upstream deleted it and added `mobile-nav.jsx`, which git did not detect as a rename. Deleted the `.js` (two twins would be ambiguous imports), ported the glass drawer and wordmark sizing into the `.jsx`, and removed the `CippSponsor` footer upstream added there, as it was already removed from the desktop rail. |
+| `src/pages/_app.jsx` | 3 | `omzig.ai Portal` title, upstream's `viewport-fit=cover`. |
+| `src/pages/_document.jsx` | 3 | Our light/dark `theme-color` pair, plus upstream's `mobile-web-app-capable`. |
+| `SetupGatePage.jsx` | 3 | Upstream's `sx` layout, our `<Logo />` and "Welcome to omzig.ai". |
+| `CippApiClientManagement.jsx` | 2 | Upstream moved the table from an `api` prop to local `data` (egress usage). Took it, retitled. |
+| `CippUserManagement.jsx`, `cipp-users.jsx` | 3 | Upstream now titles a page to **match its tab label**. Titled `omzig.ai Users` and relabelled the tab in `authentication/tabOptions.json` to match. |
+
+Also merged: upstream's own `azure-static-web-apps-red-stone-*.yml`. It deploys only on
+pushes to `dev` using a secret this fork does not hold, so it is inert here. It was left
+in place because deleting it would make a modify/delete conflict every time upstream
+edits it.
+
+**Check branding survived by counting, not by eye.** Compare `omzig` mentions per file
+before and after, stripping the extension so a `.js`→`.jsx` rename is not reported as a
+loss:
+
+```bash
+git grep -ic omzig origin/main -- src public | sed -E 's/^origin\/main://; s/\.jsx?:/:/' | sort > before
+git grep -ic omzig -- src public | sed -E 's/\.jsx?:/:/' | sort > after
+join -t: -a1 -e0 -o 0,1.2,2.2 before after | awk -F: '$2>$3'
+```
+
+**Why nobody heard about it:** `omzigfrank/CIPP` has **Issues disabled**, so its weekly
+sync workflow cannot file the conflict alert it tries to file, and it fails a second time
+on the label. The monthly health check in CIPP-API *did* catch it; see §4 Step 2.
+
 ### Current state as of 2026-08-12
 
 > **Resolved and deployed 2026-08-12.** Both forks and both Azure targets are on 10.8.3;
@@ -424,9 +477,11 @@ token step as a Global Admin in the partner tenant. Check 7 warns from 60 days.
 ### Function app stopped
 
 ```bash
-az functionapp start -g CIPP -n cippwemix
-az functionapp start -g CIPP -n cippwemix-proc
+az functionapp start -g CIPP -n cippwemix-flex
 ```
+
+Only `cippwemix-flex`. The retired `cippwemix` and `cippwemix-proc` stay Stopped; see
+OUTAGE.md G for the one situation in which they are started.
 
 ### Key Vault reference not resolving
 
@@ -434,7 +489,7 @@ Check the managed identity still has vault access, then restart. References cach
 to 24h, so a restart is how you force re-resolution:
 
 ```bash
-az functionapp restart -g CIPP -n cippwemix
+az functionapp restart -g CIPP -n cippwemix-flex
 ```
 
 ### Credential hygiene
@@ -454,11 +509,57 @@ operators**: one proposes the list, another confirms in the ticket. Keep the
 credential named in `applicationsecret` plus the designated spare; everything else
 goes. Never do this during an outage — it fixes nothing.
 
+### "CIPP is slow"
+
+**Fixed 2026-09-22 by moving to Flex Consumption.** The old Y1 Consumption plan could not
+keep a server warm: Azure replaced the API's server roughly every 64 minutes *even while
+it was in use*, and each first request on a fresh server paid ~25s loading PowerShell and
+CIPP's modules. A keep-warm ping would not have helped; measured over 7 days, 51 of 56
+slow starts happened while the app was busy.
+
+How `cippwemix-flex` is tuned, and why:
+
+| Setting | Value | Why |
+| --- | --- | --- |
+| Instance memory | 4096 MB (2 cores) | The second core is what lets a page's burst of API calls run in parallel |
+| Always ready | `http=1` | One server never goes cold; background work scales on demand |
+| HTTP per-instance concurrency | 16 | A page's burst queues on the warm server instead of starting ~13s cold servers |
+| `PSWorkerInProcConcurrencyUpperBound` | 4 | 2 runspaces per core. Flex does **not** allow `FUNCTIONS_WORKER_PROCESS_COUNT` |
+| Maximum instances | 20 | Caps cost if background work spikes |
+| `AzureFunctionsJobHost__functionTimeout` | 00:30:00 | Consumption killed long activities at 10 min; overridden without patching host.json |
+
+Measured before the switch: a burst of 12 simultaneous requests against the old app
+failed 7 of 36 with HTTP 500 after ~45s; the same test against Flex, 30 at once, all
+completed under 0.18s. Cold start on Flex is ~13s against ~25s. Each new runspace pays
+CIPP's ~9s module load once, the first time it is used.
+
+Things that were tried and must not be repeated:
+
+- **`PSWorkerInProcConcurrencyUpperBound=4` on Consumption (2026-09-21/22).** It hurt:
+  processor p50 8.9s against 2.8–5.7s, because a Consumption instance has one core.
+  It is fine on Flex's two cores; the difference is the hardware, not the setting.
+- **PowerShell 7.6 (2026-09-21).** Every invocation failed; CIPP 10.10.3 does not run on
+  it. 7.4 reaches end of life on **2026-11-10** and Flex offers 7.4 and 7.6 only, so this
+  needs CyberDrain to ship 7.6 support. Watch their release notes from October.
+- **Moving the Consumption app to Basic (B1) in place.** Azure does not support direct
+  migration from Consumption to a Dedicated plan, only to Elastic Premium. App Service
+  quota also has two layers (regional `Total VMs`, then per-SKU); the error names the one
+  that blocked you.
+
+### New app name? Seed its Version row
+
+CIPP records its version with `Update-AzDataTableEntity`, which cannot create a row. A
+brand-new app name therefore "detects" a version change on every start and wipes its own
+job hub (`Clear-CippDurables`), so no orchestration ever completes. That blocked the first
+Flex cutover. Seeding the row once fixes it permanently; the command is in OUTAGE.md H,
+and health check 16 detects the loop.
+
 ### Open hardening items
 
 | Item | Status | Fix |
 | --- | --- | --- |
-| `cippwemix` HTTPS-only | ~~off~~ **enabled 2026-08-12** | — |
+| `cippwemix-flex` HTTPS-only | **enabled 2026-09-22** (created without it; caught in QC) | — |
+| `cippwemix-flex` basic-auth publishing | **off** (deploys use OIDC only) | — |
 | Key Vault purge protection | off | Owner decision — irreversible once enabled |
 | Key Vault authorization | access policies, not RBAC | Migrate to RBAC when convenient |
 | Key Vault public network access | Enabled | Acceptable while the apps are not VNet-integrated |
@@ -530,5 +631,6 @@ brand colors are AA rather than AAA, and the supplied circle icon's ground is
 
 | Date | Who | What |
 | --- | --- | --- |
+| 2026-09-22 | Frank + Claude | **Backend moved to Flex Consumption.** `cippwemix-flex` (Linux, 4 GB / 2 cores, 1 always-ready HTTP instance) now serves the portal and runs all background work; `cippwemix` and `cippwemix-proc` are Stopped rollback targets. Built next to production with no credentials and its own storage, load-tested (30 simultaneous requests all under 0.18s; the old app failed 7 of 36 with HTTP 500 under a burst of 12), then cut over. **The first cutover was rolled back** after ~20 minutes: CIPP cannot create its Version row for a new app name (`Update-AzDataTableEntity`), so every start wiped the job hub and no orchestration completed. Seeded the row, proved it on test storage, and cut over again at 23:36Z (site API unlinked for 13s); the 23:45Z cycle ran orchestrations and activities with zero errors. Also found: **`cippwemix-proc` had been running 10.6.1 since 2026-07-14** while the API ran 10.10.3, because no workflow deployed it. The single app removes that failure mode. Pipeline: new `deploy-flex` job with OIDC identity `CIPP-Deploy-GitHub-Flex` (no stored secret). Health check gained checks 14-16 (deployed version, background work actually executing, version-loop detector) and a retired-apps check; the rotation script now restarts only running apps. Flex had been created without HTTPS-only; fixed in QC. **Frontend 10.8.5 → 10.10.3** (PR #41, conflicted since 2026-08-21; issue #68 flagged it 2026-09-01 and it sat unactioned): resolved 9 conflicts from upstream's `.js`→`.jsx` rename, fixed four overlay pages broken by it, branded the sign-in screen. Reverted `PSWorkerInProcConcurrencyUpperBound=4` on Consumption (§8). Quota: B1/B2/S1/P0v3/P1v3/EP1/EP2 all creatable in East US 2 from 21:17Z. **Open:** issues are disabled on `omzigfrank/CIPP`; `omzigfrank` is the only collaborator on CIPP-API, so health issues notify nobody else; the dev stack's backend was last deployed 2026-07-11. |
 | 2026-08-12 | Frank + Claude | **Rebrand:** applied omzig.ai brand sheet v1 across the frontend (86 files) and swept the retired mark from the API overlay (28 files). Retired the `#3088C8` palette and the all-caps macron mark; Space Grotesk + Calibri; live-text wordmark; icons regenerated. Fixed three contrast defects found by measuring: white-on-Electric primary labels, a focus ring that would have failed on white, and footer opacity that had one line at 2.95:1 (below AA). Verified with a real Node 22.22.0 production build (exit 0, 1244-file export, retired mark absent from all built output). Frontend `7fdf9a10`, API `9baec3911`. See §10. |
 | 2026-08-12 | Frank + Claude | **Outage fixed:** rotated the expired CIPP-SAM secret (`AADSTS7000222`, expired 2026-07-22), verified end-to-end. **Upgraded 10.7.5/10.7.3 → 10.8.3** on both forks and both Azure targets; resolved all 6 sync conflicts (§7); both deploy Actions succeeded; post-upgrade health check all green. **Credential cleanup:** deleted 23 unused CIPP-SAM secrets (22 `CIPPInstall` + 1 expired), keeping the in-use secret and `CIPP-SAM-Secret` as a spare; re-verified auth after. Enabled HTTPS-only on `cippwemix`. Set `SSOAppSecret` expiry metadata to match CIPP-SSO's real credential (2028-06-15). Added `CIPP_KV_NAME=kv-omzig-cipp-dev` to `func-omzig-cipp-dev`. Registered the scheduled monthly check (1st of month, 09:00 local). Established this runbook, `Invoke-CippHealthCheck.ps1`, `Invoke-CippSecretRotation.ps1`, and the `/cipp` skill. **Found still open:** the backend `Omzig Upstream Sync` workflow has `TARGET_BRANCH: main` but the repo's default branch is `master`, so it has failed every run since ≥2026-07-13. |

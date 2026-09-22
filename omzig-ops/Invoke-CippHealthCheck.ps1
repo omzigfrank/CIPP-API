@@ -9,7 +9,7 @@
 
     Checks performed:
       1  Azure context and access
-      2  Function app run state (API + processor)
+      2  Function app run state (API, plus any processor) and retired apps still stopped
       3  Key Vault references resolve to secrets that exist and are enabled
       4  LIVE token acquisition using the vault's current client secret   <-- catches AADSTS7000222
       5  CIPP-SAM app registration secret + certificate expiry runway
@@ -21,6 +21,12 @@
       11 Stale / orphaned app-registration credentials
       12 Baseline hardening (HTTPS-only, min TLS)
       13 Auth error rate from Log Analytics
+      14 DEPLOYED version: what the app itself reports at startup, not what the repo says
+      15 Background work is actually executing (timers AND orchestrations/activities)
+      16 Version-change cleanup loop (CIPP wiping its own job hub on every start)
+
+    Since 2026-09-22 the API is a single Flex Consumption app (cippwemix-flex) that also
+    runs the background work. The old Consumption apps are retired and must stay Stopped.
 
 .PARAMETER SkipTokenTest
     Skip check 4. Use when the operator lacks Key Vault secret-read permission.
@@ -45,8 +51,12 @@
 param(
     [string]$Subscription     = '48019666-dd78-439e-9890-030ab5156f23',
     [string]$ResourceGroup    = 'CIPP',
-    [string]$ApiApp           = 'cippwemix',
-    [string]$ProcessorApp     = 'cippwemix-proc',
+    [string]$ApiApp           = 'cippwemix-flex',
+    # Empty on the single-app Flex layout, where the API app runs the background work too.
+    [string]$ProcessorApp     = '',
+    # Retired apps must stay Stopped. A running retired processor runs every timer a
+    # second time, so standards and alerts would hit client tenants twice.
+    [string[]]$RetiredApps    = @('cippwemix', 'cippwemix-proc'),
     [string]$VaultName        = 'cippwemix',
     [string]$SecretName       = 'applicationsecret',
     [string]$Workspace        = 'law-cipp-wemix',
@@ -160,12 +170,14 @@ function Get-CippSite {
     $web = Invoke-Az @('rest', '--method', 'GET', '--url', "$base/config/web?api-version=2023-12-01")
     return [pscustomobject]@{
         state      = $site.properties.state
+        sku        = $site.properties.sku
         httpsOnly  = $site.properties.httpsOnly
         siteConfig = [pscustomobject]@{ minTlsVersion = $web.properties.minTlsVersion }
     }
 }
 
-foreach ($app in @($ApiApp, $ProcessorApp)) {
+$ApiSku = $null
+foreach ($app in @($ApiApp, $ProcessorApp) | Where-Object { $_ }) {
     $site = Get-CippSite -Name $app
     if (-not $site) {
         if (Test-AzAuthError) {
@@ -177,8 +189,9 @@ foreach ($app in @($ApiApp, $ProcessorApp)) {
         }
         continue
     }
+    if ($app -eq $ApiApp) { $ApiSku = $site.sku }
     if ($site.state -eq 'Running') {
-        Add-Finding OK 'Function app' "$app is Running."
+        Add-Finding OK 'Function app' "$app is Running$(if ($site.sku) { " ($($site.sku))" })."
     } else {
         Add-Finding CRITICAL 'Function app' "$app is '$($site.state)'." "Run: az functionapp start -g $ResourceGroup -n $app"
     }
@@ -190,6 +203,23 @@ foreach ($app in @($ApiApp, $ProcessorApp)) {
     }
     if ($site.siteConfig.minTlsVersion -and [double]$site.siteConfig.minTlsVersion -lt 1.2) {
         Add-Finding WARN 'Hardening' "$app min TLS is $($site.siteConfig.minTlsVersion)." 'Raise to 1.2 or higher.'
+    }
+}
+
+foreach ($app in $RetiredApps | Where-Object { $_ }) {
+    $site = Get-CippSite -Name $app
+    if (-not $site) {
+        if (Test-AzAuthError) {
+            Add-Finding WARN 'Retired app' "$app not readable: $(Get-AzErrorSummary)" ''
+        } else {
+            Add-Finding INFO 'Retired app' "$app no longer exists."
+        }
+    } elseif ($site.state -eq 'Running') {
+        Add-Finding CRITICAL 'Retired app' ("$app is Running. It was retired when the API moved to $ApiApp; " +
+            'if its background triggers are enabled it runs every job a second time.') `
+            "Run: az functionapp stop -g $ResourceGroup -n $app   (only restart it as part of a rollback, see OUTAGE.md)"
+    } else {
+        Add-Finding OK 'Retired app' "$app is $($site.state) (kept as a rollback target)."
     }
 }
 
@@ -462,8 +492,114 @@ if ($deployments -and $deployments.value) {
     $sev = if ($ageDays -gt 21) { 'WARN' } else { 'OK' }
     Add-Finding $sev 'Deployment' "Active deployment on $ApiApp is $ageDays days old ($($when.ToString('yyyy-MM-dd')))." `
         $(if ($ageDays -gt 21) { 'Deploys have stalled - check the GitHub Action and the sync PR.' } else { '' })
+} elseif ($ApiSku -eq 'FlexConsumption') {
+    # Flex keeps its package in a blob container rather than Kudu deployment history.
+    # Check 14 reads what the app actually runs, which is the question this was answering.
+    Add-Finding INFO 'Deployment' "$ApiApp is Flex Consumption (no Kudu deployment history); see the Deployed version check."
 } else {
     Add-Finding WARN 'Deployment' "Could not read deployment history for $ApiApp." ''
+}
+
+# Log Analytics helper for checks 13-16. The body goes through a temp file because
+# `az rest --body` mangles inline JSON on Windows; the query holds no secrets.
+function Invoke-CippKql {
+    param([Parameter(Mandatory)][string]$Kql)
+    $body = (@{ query = $Kql } | ConvertTo-Json -Compress)
+    $file = Join-Path ([System.IO.Path]::GetTempPath()) "cipp-kql-$([guid]::NewGuid().ToString('N')).json"
+    try {
+        Set-Content -Path $file -Value $body -Encoding utf8 -NoNewline
+        $url = "https://management.azure.com/subscriptions/$Subscription/resourceGroups/$ResourceGroup" +
+               "/providers/Microsoft.OperationalInsights/workspaces/$Workspace/api/query?api-version=2020-08-01"
+        $r = Invoke-Az @('rest', '--method', 'POST', '--url', $url, '--body', "@$file",
+                         '--headers', 'Content-Type=application/json')
+        if ($r -and $r.Tables) { return $r.Tables[0] }
+        return $null
+    } finally {
+        Remove-Item $file -ErrorAction SilentlyContinue
+    }
+}
+
+# ------------------------------------ 14. DEPLOYED version (what the app runs, not the repo)
+# The repo check (8) passed for two months while cippwemix-proc ran 10.6.1 against a 10.10.3
+# API, because no workflow deployed the processor. CIPP logs its real version at startup.
+$ver = Invoke-CippKql @"
+AppTraces
+| where TimeGenerated > ago(48h) and Message has 'API Version:'
+| parse Message with * 'Function App: ' app ' | API Version: ' ver ' | PS Version: ' ps
+| where isnotempty(app)
+| summarize arg_max(TimeGenerated, ver, ps) by app
+"@
+$running = @{}
+if ($ver) { foreach ($r in $ver.Rows) { $running[$r[0]] = [pscustomobject]@{ Seen = $r[1]; Version = $r[2]; PS = $r[3] } } }
+foreach ($app in @($ApiApp, $ProcessorApp) | Where-Object { $_ }) {
+    $r = $running[$app]
+    if (-not $r) {
+        Add-Finding WARN 'Deployed version' "$app has not logged a startup in 48h, so its running version is unknown." `
+            'Open the portal or wait for the next timer, then re-run.'
+    } elseif ($apiDeployed -and $r.Version -ne $apiDeployed) {
+        Add-Finding CRITICAL 'Deployed version' "$app is RUNNING $($r.Version) but the repo is on $apiDeployed." `
+            'The deploy workflow did not reach this app. Check the Build and deploy run for the deploy-flex job.'
+    } else {
+        Add-Finding OK 'Deployed version' "$app is running $($r.Version) on PowerShell $($r.PS)."
+    }
+}
+
+# --------------------------------------------- 15. Background work is really executing
+# A timer that fires but starts nothing looks healthy from the outside. That is what the
+# 2026-09-22 cutover looked like while CIPP was wiping its own job hub (see check 16).
+$BackgroundApp = if ($ProcessorApp) { $ProcessorApp } else { $ApiApp }
+$bg = Invoke-CippKql @"
+AppRequests
+| where TimeGenerated > ago(2h) and AppRoleName == '$BackgroundApp'
+| summarize timers = countif(Name == 'CIPPTimer'),
+            work = countif(Name in ('CIPPOrchestrator', 'CIPPActivityFunction', 'CIPPQueueTrigger')),
+            failed = countif(Success == false and Name != 'CIPPHttpTrigger')
+"@
+if ($bg -and $bg.Rows.Count -gt 0) {
+    $timers = [int]$bg.Rows[0][0]; $work = [int]$bg.Rows[0][1]; $failed = [int]$bg.Rows[0][2]
+    if ($timers -eq 0) {
+        Add-Finding CRITICAL 'Background' "No CIPP timer ran on $BackgroundApp in 2h (expected ~8)." `
+            'Background jobs are not running: check the app is Running and AzureWebJobs.CIPPTimer.Disabled is not set.'
+    } elseif ($work -eq 0) {
+        Add-Finding WARN 'Background' "$timers timer runs but no orchestration/activity/queue work in 2h on $BackgroundApp." `
+            'Normal CIPP load starts work every cycle. Look for listener errors, then check 16.'
+    } else {
+        Add-Finding OK 'Background' "$BackgroundApp ran $timers timers and $work background executions in 2h ($failed failed)."
+    }
+} else {
+    Add-Finding WARN 'Background' 'Could not query background activity.' 'Check workspace access.'
+}
+
+# ------------------------------------------ 16. Version-change cleanup loop
+# profile.ps1 records the version with Update-AzDataTableEntity, which cannot CREATE a row.
+# For a new app name the row never exists, so every start "detects" a version change and
+# Clear-CippDurables wipes the job hub again. Fix: seed the Version row (runbook section 8).
+# Judged on the MOST RECENT start: each start logs 'API Version:' and, when looping, logs
+# 'Version has changed from None' milliseconds later. So a loop is live when the newest
+# 'from None' is later than the newest start line; older ones are history.
+$loop = Invoke-CippKql @"
+AppTraces
+| where TimeGenerated > ago(24h) and AppRoleName == '$ApiApp'
+| where Message has 'API Version:' or Message has 'Version has changed from'
+| summarize lastStart = maxif(TimeGenerated, Message has 'API Version:'),
+            lastNone  = maxif(TimeGenerated, Message has 'from None'),
+            fromNone  = countif(Message has 'from None'),
+            changes   = countif(Message has 'Version has changed from')
+"@
+if ($loop -and $loop.Rows.Count -gt 0 -and $loop.Rows[0][0]) {
+    $lastStart = ([datetime]$loop.Rows[0][0]).ToUniversalTime()
+    $lastNone  = if ($loop.Rows[0][1]) { ([datetime]$loop.Rows[0][1]).ToUniversalTime() } else { $null }
+    $fromNone = [int]$loop.Rows[0][2]; $changes = [int]$loop.Rows[0][3]
+    if ($lastNone -and $lastNone -ge $lastStart) {
+        Add-Finding CRITICAL 'Version loop' "$ApiApp's latest start ($($lastStart.ToString('HH:mm'))Z) found no Version row, so it wiped its own job hub; $fromNone such starts in 24h." `
+            "Seed the row: az storage entity insert --table-name Version --entity PartitionKey=Version RowKey=$ApiApp Version=<running version> (runbook section 8)."
+    } elseif ($fromNone -gt 0) {
+        Add-Finding OK 'Version loop' "Resolved: $fromNone looping start(s) in 24h, the last at $($lastNone.ToString('HH:mm'))Z; the latest start ($($lastStart.ToString('HH:mm'))Z) was clean."
+    } elseif ($changes -gt 3) {
+        Add-Finding WARN 'Version loop' "$ApiApp reported a version change $changes times in 24h." 'Expected once per real upgrade.'
+    } else {
+        Add-Finding OK 'Version loop' "$ApiApp version row is stable ($changes version change(s) in 24h)."
+    }
 }
 
 # --------------------------------------------- 13. Auth error rate from Log Analytics

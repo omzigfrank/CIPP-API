@@ -46,7 +46,9 @@ param(
     [string]$ResourceGroup  = 'CIPP',
     [string]$VaultName      = 'cippwemix',
     [string]$SecretName     = 'applicationsecret',
-    [string[]]$FunctionApps = @('cippwemix', 'cippwemix-proc'),
+    # Since 2026-09-22 the only live app is the Flex app. The retired cippwemix and
+    # cippwemix-proc are Stopped rollback targets: never list them here.
+    [string[]]$FunctionApps = @('cippwemix-flex'),
     [ValidateRange(1, 24)][int]$LifetimeMonths = 24
 )
 
@@ -159,6 +161,15 @@ finally {
 
 # ------------------------- 5. Restart so the Key Vault reference re-resolves immediately
 foreach ($fa in $FunctionApps) {
+    # Never restart a Stopped app: a restart can bring a retired processor back, and a
+    # second processor runs every timer twice against client tenants.
+    # ARM read, not `az functionapp show`: the CLI returns a blank state for Flex apps.
+    $state = & az rest --method GET --url ("https://management.azure.com/subscriptions/$Subscription/resourceGroups/" +
+        "$ResourceGroup/providers/Microsoft.Web/sites/$fa`?api-version=2024-04-01") --query properties.state -o tsv 2>$null
+    if ($state -and $state -ne 'Running') {
+        Write-Host "Skipping $fa - it is '$state', not Running." -ForegroundColor Yellow
+        continue
+    }
     Write-Host "Restarting $fa..." -NoNewline
     & az functionapp restart -g $ResourceGroup -n $fa -o none 2>$null
     if ($LASTEXITCODE -eq 0) { Write-Host ' done.' -ForegroundColor Green }
