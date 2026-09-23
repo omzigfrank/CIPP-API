@@ -559,9 +559,18 @@ CIPP's ~9s module load once, the first time it is used.
    5-minute sentinel tick sends 12 parallel pings through the portal
    (`Public/Performance/Invoke-OmzigPortalWarmup.ps1`), so the runspaces are built before
    anyone opens a page. Runspaces are never discarded, so on a warm server this is 12 calls
-   of ~0.1s. Target: `OMZIG_PORTAL_URL`, else CIPP's stored `Config/InstanceProperties/CIPPURL`;
-   never the function app's own hostname, which rejects anonymous calls. Check: traces
+   of ~0.1s. Target: `OMZIG_PORTAL_URL` (set to `https://management.omzig.it`), else CIPP's
+   stored `Config/InstanceProperties/CIPPURL`; never a `*.azurewebsites.net` host, which is a
+   function app and rejects anonymous calls. Check: traces
    `OmzigPortalWarmup: {..."Ok":12...}` every 5 minutes. Off switch: `OMZIG_PORTAL_WARM_CALLS=0`.
+
+**Stale `CIPPURL` (found 2026-09-23, open).** CIPP's stored instance URL still names the
+retired `cippwemix.azurewebsites.net`, which is Stopped and returns 403. Background work builds
+links from it: snooze links in scheduled-alert emails, drift and notification emails, audit-log
+downloads, and the Partner Center webhook registration. GDAP invite links are not affected (they
+use the live request). Fix, from the portal on `management.omzig.it`: re-save the Partner Center
+webhook (automated onboarding) settings. That runs `Get-CIPPHostname -Save` against the request
+host and re-registers the webhook. It is an owner action because it re-registers with Microsoft.
 
 Every new runspace logs `Function App: cippwemix-flex | API Version ...` from `profile.ps1`,
 so counting that trace per instance shows how many runspaces a server has built.

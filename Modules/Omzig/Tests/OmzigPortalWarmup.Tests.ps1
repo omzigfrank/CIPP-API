@@ -80,7 +80,18 @@ Describe 'Resolve-OmzigPortalUrl' {
     It "never returns the function app's own hostname (it would reject an anonymous ping)" {
         $env:WEBSITE_HOSTNAME = 'cippwemix-flex.azurewebsites.net'
         Mock -ModuleName Omzig Get-CIPPAzDataTableEntity { [pscustomobject]@{ Value = 'cippwemix-flex.azurewebsites.net' } }
-        InModuleScope Omzig { Resolve-OmzigPortalUrl } | Should -BeNullOrEmpty
+        InModuleScope Omzig { Resolve-OmzigPortalUrl -WarningAction SilentlyContinue } | Should -BeNullOrEmpty
+    }
+
+    It 'rejects any function-app host, such as a retired app still stored in CIPPURL (seen 2026-09-23)' {
+        $env:WEBSITE_HOSTNAME = 'cippwemix-flex.azurewebsites.net'
+        Mock -ModuleName Omzig Get-CIPPAzDataTableEntity { [pscustomobject]@{ Value = 'cippwemix.azurewebsites.net' } }
+        InModuleScope Omzig { Resolve-OmzigPortalUrl -WarningVariable W -WarningAction SilentlyContinue; "$W" | Should -Match 'OMZIG_PORTAL_URL' } | Should -BeNullOrEmpty
+    }
+
+    It 'accepts a Static Web App default host' {
+        Mock -ModuleName Omzig Get-CIPPAzDataTableEntity { [pscustomobject]@{ Value = 'happy-sky-0123.azurestaticapps.net' } }
+        InModuleScope Omzig { Resolve-OmzigPortalUrl } | Should -Be 'https://happy-sky-0123.azurestaticapps.net'
     }
 
     It 'returns nothing when no URL is known, and when the lookup fails' {
