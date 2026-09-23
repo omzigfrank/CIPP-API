@@ -26,6 +26,7 @@
       16 Version-change cleanup loop (CIPP wiping its own job hub on every start)
       17 Break-glass sentinel ran recently, and which tenants it cannot see
       18 GDAP expiry sentinel ran in the last day, and what is about to lapse
+      19 Portal warm-up ran in the last 30 minutes and every ping was answered
 
     Since 2026-09-22 the API is a single Flex Consumption app (cippwemix-flex) that also
     runs the background work. The old Consumption apps are retired and must stay Stopped.
@@ -711,6 +712,33 @@ if ($gdapRun -and $gdapRun.Rows.Count -gt 0 -and [int]$gdapRun.Rows[0][0] -gt 0)
 } elseif ($gdapRun) {
     Add-Finding WARN 'GDAP expiry' "The GDAP expiry sentinel has not run on $ApiApp in 26h (it runs daily at 13:00 UTC)." `
         'Check AzureWebJobs.OmzigGdapSentinelTimer.Disabled is not set; to run it now add RunNow/GdapExpiry to OmzigSentinelState.'
+}
+
+# ------------------------------------------------ 19. Portal warm-up keeps pages fast
+# A new HTTP server builds its runspaces one at a time (~3.5s each) unless the 5-minute
+# sentinel tick has warmed it (runbook §8). If the warm-up stops or its pings are rejected,
+# the first dashboard on each new server is slow again, and nothing else says so.
+$warmRun = Invoke-CippKql @"
+AppTraces
+| where TimeGenerated > ago(30m) and AppRoleName == '$ApiApp' and Message has 'OmzigPortalWarmup:'
+| summarize arg_max(TimeGenerated, Message), lines = count()
+| project lines, lastRun = TimeGenerated, lastLine = Message
+"@
+if ($warmRun -and $warmRun.Rows.Count -gt 0 -and [int]$warmRun.Rows[0][0] -gt 0) {
+    $line = ([string]$warmRun.Rows[0][2]) -replace '^.*?OmzigPortalWarmup:\s*', ''
+    $w = $null
+    if ($line.StartsWith('{')) { try { $w = $line | ConvertFrom-Json } catch {} }
+    if ($w -and [int]$w.Failed -eq 0) {
+        Add-Finding OK 'Portal warm-up' "Last warm-up: $($w.Ok)/$($w.Calls) pings to $($w.Target) answered in $($w.WallMs) ms."
+    } elseif ($w) {
+        Add-Finding WARN 'Portal warm-up' "Last warm-up: $($w.Failed) of $($w.Calls) pings to $($w.Target) failed." `
+            'Check the portal answers https://<portal>/api/PublicPing anonymously; see runbook §8.'
+    } else {
+        Add-Finding WARN 'Portal warm-up' "Warm-up is not running: $line" 'Set OMZIG_PORTAL_URL, or see runbook §8.'
+    }
+} elseif ($warmRun) {
+    Add-Finding WARN 'Portal warm-up' "No portal warm-up on $ApiApp in 30 min (it rides on the 5-minute sentinel tick)." `
+        'Check the sentinel is running (check 17) and OMZIG_PORTAL_WARM_CALLS is not 0.'
 }
 
 # ------------------------------------------------------------------------ Report

@@ -32,6 +32,8 @@ Upstream touchpoints are carefully scoped:
 | `Public/Alerts/New-OmzigTeamsCard.ps1` | Adaptive Card payload for Teams Workflows webhooks (the `{ text }` connector format is retired) | §7.5 |
 | `Private/Get-OmzigTeamsWebhook.ps1` | Resolves the webhook from `OMZIG_TEAMS_WEBHOOK` or Key Vault `teams-alert-webhook` | §7.5 |
 | `Private/Set-OmzigThreadPoolFloor.ps1` | Raises the worker's .NET thread-pool minimum (32, `OMZIG_THREADPOOL_MIN`) at import so a page's burst of calls does not stall after idle | Runbook §8 |
+| `Public/Performance/Invoke-OmzigPortalWarmup.ps1` | 12 parallel anonymous pings through the portal every sentinel tick, so a new HTTP server builds its runspaces before anyone opens a page | Runbook §8 |
+| `Private/Resolve-OmzigPortalUrl.ps1` | Portal base URL: `OMZIG_PORTAL_URL`, else CIPP's stored `CIPPURL`; never the function app's own hostname | Runbook §8 |
 
 `OmzigSentinelTimer/function.json` at the repo root is the overlay's own timer function.
 It exists because CIPP's timer list (`Config/CIPPTimers.json`) and its scheduled-task
