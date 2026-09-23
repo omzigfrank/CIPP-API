@@ -12,6 +12,15 @@ foreach ($import in @($Functions)) {
     }
 }
 
+# profile.ps1 imports this module into every runspace, so this is the overlay's hook for
+# process-wide worker tuning. Only inside the Functions host (WEBSITE_SITE_NAME, which
+# CIPP's own profile relies on, is set there on every plan including Flex): a local import
+# or a test run must not change the caller's thread pool. The first runspace raises the
+# floor; later ones find it already set and do nothing.
+if ($env:WEBSITE_SITE_NAME) {
+    try { $null = Set-OmzigThreadPoolFloor } catch { Write-Warning "Omzig: thread-pool floor not set: $($_.Exception.Message)" }
+}
+
 # Functions-host entrypoints. The PowerShell worker finds a function.json entryPoint by
 # parsing THIS file's syntax tree, so an entrypoint must be written here; one that is only
 # dot-sourced from Public\ fails with "Cannot find the function ... defined in Omzig.psm1".

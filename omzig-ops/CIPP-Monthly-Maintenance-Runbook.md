@@ -527,11 +527,25 @@ How `cippwemix-flex` is tuned, and why:
 | `PSWorkerInProcConcurrencyUpperBound` | 4 | 2 runspaces per core. Flex does **not** allow `FUNCTIONS_WORKER_PROCESS_COUNT` |
 | Maximum instances | 20 | Caps cost if background work spikes |
 | `AzureFunctionsJobHost__functionTimeout` | 00:30:00 | Consumption killed long activities at 10 min; overridden without patching host.json |
+| Thread-pool minimum (overlay, `OMZIG_THREADPOOL_MIN`) | 32 | Set in code by `Set-OmzigThreadPoolFloor` when each worker starts; see below. `0` turns it off |
 
 Measured before the switch: a burst of 12 simultaneous requests against the old app
 failed 7 of 36 with HTTP 500 after ~45s; the same test against Flex, 30 at once, all
 completed under 0.18s. Cold start on Flex is ~13s against ~25s. Each new runspace pays
 CIPP's ~9s module load once, the first time it is used.
+
+**Slow first page after a quiet spell (fixed 2026-09-23).** The PowerShell worker holds one
+.NET thread-pool thread for every call in flight, including calls queued for one of the 4
+runspaces. .NET keeps one thread per core (2 here), adds more only about twice a second,
+and drops idle ones after ~20s. So when the dashboard fired its 10-12 calls after a minute
+or more of quiet, every call waited for threads: 10 parallel anonymous `PublicPing` calls
+took 5.3s after 45s idle, 0.35s back-to-back, and 4 parallel took 0.34s. The overlay now
+raises the minimum to 32 when the worker starts (`Modules/Omzig/Private/Set-OmzigThreadPoolFloor.ps1`,
+called from `Omzig.psm1`). The minimum lets the pool create threads without that delay;
+it does not pre-create them. .NET's own environment variable for this needs .NET 10 and
+PowerShell 7.4 runs on .NET 8, hence the code. To confirm it is active, look for
+`Omzig: thread-pool minimum raised from 2 to 32` in the traces after a restart; to switch
+it off, set app setting `OMZIG_THREADPOOL_MIN=0` (takes effect on the next restart).
 
 Things that were tried and must not be repeated:
 
@@ -702,6 +716,7 @@ brand colors are AA rather than AAA, and the supplied circle icon's ground is
 
 | Date | Who | What |
 | --- | --- | --- |
+| 2026-09-23 | Frank + Claude | **Slow first page load fixed.** Performance check against the old apps: portal calls p50 9.3s to 0.41s, calls over 30s 29% to 0%, dashboard ~60s to ~13s, zero failed requests. The remaining slowness was the first page after a quiet spell (3-7s, up to ~19s after a recycle): .NET thread-pool starvation, reproduced with 10 parallel `PublicPing` calls (5.3s after idle, 0.35s warm). The overlay now raises the worker's thread-pool minimum to 32 at start-up (§8). 11 new Pester tests; all 155 pass, and two deliberately broken builds each failed the intended tests. |
 | 2026-09-23 | Frank + Claude | **Break-glass alerting made live.** The §7.5 sentinel existed but nothing ever ran it, so no break-glass sign-in alerted anyone; its Teams post also used the retired `{ text }` connector format, and the promised email leg was never written. Added the scheduled poller (every 5 min, all tenants + partner tenant, dedupe, incident windows, P1-licence and GDAP blind spots reported), `Send-OmzigAlert` (Logbook, Adaptive Card, email, P1 PSA), a self-test hook and health check 17. 16 new Pester tests; all 134 pass, and four deliberately broken builds each failed the intended test. Health-check workflow now posts every run to the ops chat and no longer files a monthly issue for the two checks its read-only identity cannot perform. Deleted the unused dev stack `rg-omzig-cipp-dev` (all 10 resources; its Cosmos DB held 0 bytes; the vault is soft-deleted until 2026-12-22). Issues enabled on `omzigfrank/CIPP` with the `upstream-sync` label. |
 | 2026-09-22 | Frank + Claude | **Backend moved to Flex Consumption.** `cippwemix-flex` (Linux, 4 GB / 2 cores, 1 always-ready HTTP instance) now serves the portal and runs all background work; `cippwemix` and `cippwemix-proc` are Stopped rollback targets. Built next to production with no credentials and its own storage, load-tested (30 simultaneous requests all under 0.18s; the old app failed 7 of 36 with HTTP 500 under a burst of 12), then cut over. **The first cutover was rolled back** after ~20 minutes: CIPP cannot create its Version row for a new app name (`Update-AzDataTableEntity`), so every start wiped the job hub and no orchestration completed. Seeded the row, proved it on test storage, and cut over again at 23:36Z (site API unlinked for 13s); the 23:45Z cycle ran orchestrations and activities with zero errors. Also found: **`cippwemix-proc` had been running 10.6.1 since 2026-07-14** while the API ran 10.10.3, because no workflow deployed it. The single app removes that failure mode. Pipeline: new `deploy-flex` job with OIDC identity `CIPP-Deploy-GitHub-Flex` (no stored secret). Health check gained checks 14-16 (deployed version, background work actually executing, version-loop detector) and a retired-apps check; the rotation script now restarts only running apps. Flex had been created without HTTPS-only; fixed in QC. **Frontend 10.8.5 → 10.10.3** (PR #41, conflicted since 2026-08-21; issue #68 flagged it 2026-09-01 and it sat unactioned): resolved 9 conflicts from upstream's `.js`→`.jsx` rename, fixed four overlay pages broken by it, branded the sign-in screen. Reverted `PSWorkerInProcConcurrencyUpperBound=4` on Consumption (§8). Quota: B1/B2/S1/P0v3/P1v3/EP1/EP2 all creatable in East US 2 from 21:17Z. **Open:** issues are disabled on `omzigfrank/CIPP`; `omzigfrank` is the only collaborator on CIPP-API, so health issues notify nobody else; the dev stack's backend was last deployed 2026-07-11. |
 | 2026-08-12 | Frank + Claude | **Rebrand:** applied omzig.ai brand sheet v1 across the frontend (86 files) and swept the retired mark from the API overlay (28 files). Retired the `#3088C8` palette and the all-caps macron mark; Space Grotesk + Calibri; live-text wordmark; icons regenerated. Fixed three contrast defects found by measuring: white-on-Electric primary labels, a focus ring that would have failed on white, and footer opacity that had one line at 2.95:1 (below AA). Verified with a real Node 22.22.0 production build (exit 0, 1244-file export, retired mark absent from all built output). Frontend `7fdf9a10`, API `9baec3911`. See §10. |
