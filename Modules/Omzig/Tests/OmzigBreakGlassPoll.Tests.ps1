@@ -3,7 +3,8 @@
 
 BeforeAll {
     # CIPP-API helpers the overlay calls. They are not loaded in a bare test run, and
-    # Pester can only mock a command that exists, so define no-op stubs first.
+    # Pester can only mock a command that exists, so define no-op stubs first; their
+    # parameter names match the real helpers so the mocks below bind the same way.
     $Stubs = @{
         'Get-CIPPTable'             = '[CmdletBinding()] param($tablename)'
         'Get-CIPPAzDataTableEntity' = '[CmdletBinding()] param($Context, $Filter, $Property, $First, $Skip)'
@@ -15,10 +16,11 @@ BeforeAll {
         'Send-CIPPAlert'            = '[CmdletBinding()] param($Type, $Title, $HTMLContent, $JSONContent, $TenantFilter, $altEmail, $altWebhook, $APIName)'
         'Get-CippKeyVaultSecret'    = '[CmdletBinding()] param($VaultName, $Name, [switch]$AsPlainText)'
     }
+    # Always (re)define: another test file's leftover global stub with a different
+    # signature would otherwise be mocked in place of these, and the table mocks below
+    # would silently receive an empty -Context (seen on a second run in one session).
     foreach ($Name in $Stubs.Keys) {
-        if (-not (Get-Command $Name -ErrorAction SilentlyContinue)) {
-            Set-Item -Path "function:global:$Name" -Value ([scriptblock]::Create($Stubs[$Name]))
-        }
+        Set-Item -Path "function:global:$Name" -Value ([scriptblock]::Create($Stubs[$Name]))
     }
     Import-Module (Join-Path $PSScriptRoot '..' 'Omzig.psd1') -Force
 
@@ -28,6 +30,15 @@ BeforeAll {
         [pscustomobject]@{ id = $Id; userPrincipalName = $Upn; createdDateTime = $When; appDisplayName = 'Azure Portal'
             ipAddress = '203.0.113.10'; status = [pscustomobject]@{ errorCode = $ErrorCode; failureReason = $(if ($ErrorCode) { 'Invalid password' }) } }
     }
+}
+
+AfterAll {
+    foreach ($Name in 'Get-CIPPTable', 'Get-CIPPAzDataTableEntity', 'Add-CIPPAzDataTableEntity', 'Remove-AzDataTableEntity',
+        'Get-Tenants', 'New-GraphGetRequest', 'Write-LogMessage', 'Send-CIPPAlert', 'Get-CippKeyVaultSecret', 'New-SignIn') {
+        Remove-Item -Path "function:global:$Name" -ErrorAction SilentlyContinue
+    }
+    Remove-Variable -Name BGT -Scope Global -ErrorAction SilentlyContinue
+    Remove-Module Omzig -ErrorAction SilentlyContinue
 }
 
 Describe 'New-OmzigTeamsCard' {
@@ -107,19 +118,20 @@ Describe 'Invoke-OmzigBreakGlassSentinel outcome' {
 
 Describe 'Invoke-OmzigBreakGlassPoll' {
     BeforeEach {
-        $script:Written = [System.Collections.Generic.List[object]]::new()
-        $script:SeenIds = @()
-        $script:LastChecked = $null
-        $script:WindowRows = @()
-        $script:GraphUris = [System.Collections.Generic.List[string]]::new()
+        $global:BGT = @{}
+        $global:BGT.Written = [System.Collections.Generic.List[object]]::new()
+        $global:BGT.SeenIds = @()
+        $global:BGT.LastChecked = $null
+        $global:BGT.WindowRows = @()
+        $global:BGT.GraphUris = [System.Collections.Generic.List[string]]::new()
         Mock -ModuleName Omzig Get-CIPPTable { @{ Context = $tablename } }
         Mock -ModuleName Omzig Get-Tenants { @($script:Tenant) }
-        Mock -ModuleName Omzig Add-CIPPAzDataTableEntity { $script:Written.Add($Entity) }
+        Mock -ModuleName Omzig Add-CIPPAzDataTableEntity { $global:BGT.Written.Add($Entity) }
         Mock -ModuleName Omzig Get-CIPPAzDataTableEntity {
             switch ($Context) {
-                'OmzigSentinelState' { if ($script:LastChecked) { [pscustomobject]@{ LastChecked = $script:LastChecked } } }
-                'OmzigBreakGlassSeen' { if ($Filter -match "RowKey eq '([^']+)'" -and $Matches[1] -in $script:SeenIds) { [pscustomobject]@{ RowKey = $Matches[1] } } }
-                'OmzigIncidentWindows' { $script:WindowRows }
+                'OmzigSentinelState' { if ($global:BGT.LastChecked) { [pscustomobject]@{ LastChecked = $global:BGT.LastChecked } } }
+                'OmzigBreakGlassSeen' { if ($Filter -match "RowKey eq '([^']+)'" -and $Matches[1] -in $global:BGT.SeenIds) { [pscustomobject]@{ RowKey = $Matches[1] } } }
+                'OmzigIncidentWindows' { $global:BGT.WindowRows }
             }
         }
         Mock -ModuleName Omzig Invoke-OmzigBreakGlassSentinel { @($SignIns | ForEach-Object { [pscustomobject]@{ SignInId = $_.id } }) }
@@ -127,34 +139,34 @@ Describe 'Invoke-OmzigBreakGlassPoll' {
     }
 
     It 'looks back one hour on the first run and filters on the bg01/bg02 accounts' {
-        Mock -ModuleName Omzig New-GraphGetRequest { $script:GraphUris.Add($uri); @() }
+        Mock -ModuleName Omzig New-GraphGetRequest { $global:BGT.GraphUris.Add($uri); @() }
         $null = Invoke-OmzigBreakGlassPoll -Now $script:Now
-        $Uri = [uri]::UnescapeDataString($script:GraphUris[0])
+        $Uri = [uri]::UnescapeDataString($global:BGT.GraphUris[0])
         $Uri | Should -Match 'createdDateTime ge 2026-10-01T11:00:00Z'
         $Uri | Should -Match "startsWith\(userPrincipalName,'bg01@'\)"
         $Uri | Should -Match "startsWith\(userPrincipalName,'bg02@'\)"
     }
 
     It 'reads from the last check minus the overlap afterwards' {
-        $script:LastChecked = '2026-10-01T11:55:00.0000000Z'
-        Mock -ModuleName Omzig New-GraphGetRequest { $script:GraphUris.Add($uri); @() }
+        $global:BGT.LastChecked = '2026-10-01T11:55:00.0000000Z'
+        Mock -ModuleName Omzig New-GraphGetRequest { $global:BGT.GraphUris.Add($uri); @() }
         $null = Invoke-OmzigBreakGlassPoll -Now $script:Now -OverlapMinutes 20
-        [uri]::UnescapeDataString($script:GraphUris[0]) | Should -Match 'createdDateTime ge 2026-10-01T11:35:00Z'
+        [uri]::UnescapeDataString($global:BGT.GraphUris[0]) | Should -Match 'createdDateTime ge 2026-10-01T11:35:00Z'
     }
 
     It 'alerts on new sign-ins and records them so the overlap never double-alerts' {
         Mock -ModuleName Omzig New-GraphGetRequest { @(New-SignIn 's1' 'bg01@contoso.onmicrosoft.com'), (New-SignIn 's2' 'bg02@contoso.onmicrosoft.com') }
-        $script:SeenIds = @('s1')
+        $global:BGT.SeenIds = @('s1')
         $R = Invoke-OmzigBreakGlassPoll -Now $script:Now
         $R.SignIns | Should -Be 2
         $R.NewSignIns | Should -Be 1
         Should -Invoke -ModuleName Omzig Invoke-OmzigBreakGlassSentinel -Times 1 -ParameterFilter { $SignIns.Count -eq 1 -and $SignIns[0].id -eq 's2' }
-        ($script:Written | Where-Object { $_.RowKey -eq 's2' }) | Should -Not -BeNullOrEmpty
-        ($script:Written | Where-Object { $_.PartitionKey -eq 'BreakGlass' }).LastResult | Should -Be 'ok'
+        ($global:BGT.Written | Where-Object { $_.RowKey -eq 's2' }) | Should -Not -BeNullOrEmpty
+        ($global:BGT.Written | Where-Object { $_.PartitionKey -eq 'BreakGlass' }).LastResult | Should -Be 'ok'
     }
 
     It 'passes declared incident windows through, keyed by tenant domain' {
-        $script:WindowRows = @([pscustomobject]@{ PartitionKey = 'contoso.com'; Start = '2026-10-01T11:00:00Z'; End = '2026-10-01T13:00:00Z' })
+        $global:BGT.WindowRows = @([pscustomobject]@{ PartitionKey = 'contoso.com'; Start = '2026-10-01T11:00:00Z'; End = '2026-10-01T13:00:00Z' })
         Mock -ModuleName Omzig New-GraphGetRequest { @(New-SignIn 's3' 'bg01@contoso.onmicrosoft.com') }
         $null = Invoke-OmzigBreakGlassPoll -Now $script:Now
         Should -Invoke -ModuleName Omzig Invoke-OmzigBreakGlassSentinel -Times 1 -ParameterFilter { $IncidentWindows.Count -eq 1 -and $IncidentWindows[0].TenantId -eq 'contoso.com' }
@@ -164,39 +176,60 @@ Describe 'Invoke-OmzigBreakGlassPoll' {
         Mock -ModuleName Omzig New-GraphGetRequest { throw 'Neither tenant is B2C or tenant doesn''t have premium license' }
         $R = Invoke-OmzigBreakGlassPoll -Now $script:Now
         $R.NoSignInLogs | Should -Contain 'contoso.com'
-        ($script:Written | Where-Object { $_.PartitionKey -eq 'BreakGlass' }).LastResult | Should -Match 'Entra ID P1'
+        ($global:BGT.Written | Where-Object { $_.PartitionKey -eq 'BreakGlass' }).LastResult | Should -Match 'Entra ID P1'
     }
 
     It 'does not advance the checkpoint after a transient error, so the window is re-read' {
         Mock -ModuleName Omzig New-GraphGetRequest { throw 'The operation timed out' }
         $R = Invoke-OmzigBreakGlassPoll -Now $script:Now
         $R.Errors.Count | Should -Be 1
-        ($script:Written | Where-Object { $_.PartitionKey -eq 'BreakGlass' }) | Should -BeNullOrEmpty
+        ($global:BGT.Written | Where-Object { $_.PartitionKey -eq 'BreakGlass' }) | Should -BeNullOrEmpty
     }
 
     It 'includes the partner tenant, where Omzig''s own break-glass accounts live' {
         $env:TenantID = 'partner-tenant-id'
-        Mock -ModuleName Omzig New-GraphGetRequest { $script:GraphUris.Add($tenantid); @() }
+        Mock -ModuleName Omzig New-GraphGetRequest { $global:BGT.GraphUris.Add($tenantid); @() }
         $R = Invoke-OmzigBreakGlassPoll -Now $script:Now
         $R.Tenants | Should -Be 2
-        $script:GraphUris | Should -Contain 'partner-tenant-id'
+        $global:BGT.GraphUris | Should -Contain 'partner-tenant-id'
         $env:TenantID = $null
     }
 }
 
-Describe 'Receive-OmzigSentinelTimer self-test' {
+Describe 'Invoke-OmzigSentinelTimerRun self-test' {
     It 'sends a TEST alert once, clears the request and records the result' {
         Mock -ModuleName Omzig Get-CIPPTable { @{ Context = $tablename } }
         Mock -ModuleName Omzig Get-CIPPAzDataTableEntity { [pscustomobject]@{ PartitionKey = 'SelfTest'; RowKey = 'Pending'; RequestedBy = 'claude' } }
         Mock -ModuleName Omzig Send-OmzigAlert { [pscustomobject]@{ Logbook = 'sent'; Teams = 'sent'; Email = 'sent to x'; Psa = 'not applicable' } }
         Mock -ModuleName Omzig Remove-AzDataTableEntity { }
-        $script:Recorded = $null
-        Mock -ModuleName Omzig Add-CIPPAzDataTableEntity { $script:Recorded = $Entity }
+        $global:BGT = @{ Recorded = $null }
+        Mock -ModuleName Omzig Add-CIPPAzDataTableEntity { $global:BGT.Recorded = $Entity }
         Mock -ModuleName Omzig Invoke-OmzigBreakGlassPoll { }
-        Receive-OmzigSentinelTimer -Timer $null
+        Invoke-OmzigSentinelTimerRun -Timer $null
         Should -Invoke -ModuleName Omzig Send-OmzigAlert -Times 1 -ParameterFilter { $Severity -eq 'Test' -and $SkipPsa }
         Should -Invoke -ModuleName Omzig Remove-AzDataTableEntity -Times 1
-        $script:Recorded.RowKey | Should -Be 'LastResult'
+        $global:BGT.Recorded.RowKey | Should -Be 'LastResult'
         Should -Invoke -ModuleName Omzig Invoke-OmzigBreakGlassPoll -Times 1
+    }
+}
+
+Describe 'Functions-host wiring (regression: entrypoint must be written in the scriptFile)' {
+    # The PowerShell worker resolves function.json's entryPoint by parsing the scriptFile's
+    # syntax tree. On 2026-09-23 the first deploy failed every run because the entrypoint was
+    # only dot-sourced. This test does what the worker does.
+    It 'defines each Omzig function.json entryPoint literally in its scriptFile, and exports it' {
+        $Root = Join-Path $PSScriptRoot '..' '..' '..'
+        $Defs = Get-ChildItem -Path $Root -Filter function.json -Recurse -Depth 1 | ForEach-Object {
+            $J = Get-Content $_.FullName -Raw | ConvertFrom-Json
+            if ($J.scriptFile -match 'Modules/Omzig/') { [pscustomobject]@{ Dir = $_.Directory.FullName; Json = $J } }
+        }
+        @($Defs).Count | Should -BeGreaterThan 0
+        foreach ($D in $Defs) {
+            $Script = [IO.Path]::GetFullPath((Join-Path $D.Dir $D.Json.scriptFile))
+            $Ast = [System.Management.Automation.Language.Parser]::ParseFile($Script, [ref]$null, [ref]$null)
+            $Names = $Ast.FindAll({ $args[0] -is [System.Management.Automation.Language.FunctionDefinitionAst] }, $false).Name
+            $Names | Should -Contain $D.Json.entryPoint
+            (Get-Module Omzig).ExportedFunctions.Keys | Should -Contain $D.Json.entryPoint
+        }
     }
 }

@@ -12,4 +12,13 @@ foreach ($import in @($Functions)) {
     }
 }
 
-Export-ModuleMember -Function $Public.BaseName -Alias *
+# Functions-host entrypoints. The PowerShell worker finds a function.json entryPoint by
+# parsing THIS file's syntax tree, so an entrypoint must be written here; one that is only
+# dot-sourced from Public\ fails with "Cannot find the function ... defined in Omzig.psm1".
+# Keep each wrapper thin; the logic lives in the Public function it calls.
+function Receive-OmzigSentinelTimer {
+    param($Timer)
+    Invoke-OmzigSentinelTimerRun -Timer $Timer
+}
+
+Export-ModuleMember -Function (@($Public.BaseName) + 'Receive-OmzigSentinelTimer') -Alias *
