@@ -71,13 +71,19 @@ function Invoke-OmzigBreakGlassPoll {
         '&$select=id,userPrincipalName,createdDateTime,appDisplayName,ipAddress,status&$top=100'
 
         $LastResult = 'ok'
+        # -ErrorAction Stop matters: CIPP's Graph helper reports some refusals with a
+        # NON-terminating Write-Error, which would otherwise return nothing and let an
+        # unread tenant be counted as checked and clean. The partner tenant is not in
+        # CIPP's customer list, so CIPP itself reads it with -NoAuthCheck.
+        $GraphArgs = @{ uri = $Uri; tenantid = $Tenant.defaultDomainName; ErrorAction = 'Stop' }
+        if ($Tenant.customerId -eq $env:TenantID) { $GraphArgs.NoAuthCheck = $true }
         try {
-            $SignIns = @(New-GraphGetRequest -uri $Uri -tenantid $Tenant.defaultDomainName)
+            $SignIns = @(New-GraphGetRequest @GraphArgs)
         } catch {
             $Err = [string]$_.Exception.Message
             if ($Err -match 'premium|NonPremium|B2C') {
                 $Summary.NoSignInLogs.Add($Tenant.defaultDomainName); $LastResult = 'no sign-in logs (needs Entra ID P1)'
-            } elseif ($Err -match '403|Forbidden|Authorization_RequestDenied|Insufficient privileges') {
+            } elseif ($Err -match '403|Forbidden|Authorization_RequestDenied|Insufficient privileges|not in the allowed roles') {
                 $Summary.Denied.Add($Tenant.defaultDomainName); $LastResult = 'access denied (GDAP role cannot read sign-in logs)'
             } else {
                 # Transient: leave LastChecked alone so this window is read again next run.

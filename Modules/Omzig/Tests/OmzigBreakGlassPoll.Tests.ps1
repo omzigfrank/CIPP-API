@@ -11,7 +11,7 @@ BeforeAll {
         'Add-CIPPAzDataTableEntity' = '[CmdletBinding()] param($Context, $Entity, [switch]$Force, [switch]$CreateTableIfNotExists, $OperationType)'
         'Remove-AzDataTableEntity'  = '[CmdletBinding()] param($Context, $Entity)'
         'Get-Tenants'               = '[CmdletBinding()] param([switch]$IncludeAll, [switch]$IncludeErrors, $TenantFilter)'
-        'New-GraphGetRequest'       = '[CmdletBinding()] param($uri, $tenantid, $AsApp, $noPagination)'
+        'New-GraphGetRequest'       = '[CmdletBinding()] param($uri, $tenantid, $AsApp, $noPagination, $NoAuthCheck)'
         'Write-LogMessage'          = '[CmdletBinding()] param($message, $tenant, $API, $tenantId, $headers, $user, $sev, $LogData)'
         'Send-CIPPAlert'            = '[CmdletBinding()] param($Type, $Title, $HTMLContent, $JSONContent, $TenantFilter, $altEmail, $altWebhook, $APIName)'
         'Get-CippKeyVaultSecret'    = '[CmdletBinding()] param($VaultName, $Name, [switch]$AsPlainText)'
@@ -186,13 +186,36 @@ Describe 'Invoke-OmzigBreakGlassPoll' {
         ($global:BGT.Written | Where-Object { $_.PartitionKey -eq 'BreakGlass' }) | Should -BeNullOrEmpty
     }
 
-    It 'includes the partner tenant, where Omzig''s own break-glass accounts live' {
+    It 'includes the partner tenant, where Omzig''s own break-glass accounts live, reading it with -NoAuthCheck' {
         $env:TenantID = 'partner-tenant-id'
-        Mock -ModuleName Omzig New-GraphGetRequest { $global:BGT.GraphUris.Add($tenantid); @() }
+        Mock -ModuleName Omzig New-GraphGetRequest { $global:BGT.GraphUris.Add("$tenantid|$NoAuthCheck"); @() }
         $R = Invoke-OmzigBreakGlassPoll -Now $script:Now
         $R.Tenants | Should -Be 2
-        $global:BGT.GraphUris | Should -Contain 'partner-tenant-id'
+        $global:BGT.GraphUris | Should -Contain 'partner-tenant-id|True'
+        $global:BGT.GraphUris | Should -Contain 'contoso.com|'
         $env:TenantID = $null
+    }
+
+    It 'never counts a tenant as clean when CIPP refuses it with a non-terminating error' {
+        # Production 2026-09-23: CIPP Write-Error'd "not in CIPP's tenant list" for the partner
+        # tenant; without -ErrorAction Stop that returned nothing and read as "no sign-ins".
+        # Behave like the real advanced function: a bare Write-Error only becomes a
+        # catchable exception when the caller passes -ErrorAction Stop.
+        Mock -ModuleName Omzig New-GraphGetRequest {
+            $Msg = "Graph request denied for 'x': the tenant is not in CIPP's tenant list."
+            if ($PesterBoundParameters.ErrorAction -eq 'Stop') { throw $Msg } else { Write-Error $Msg -ErrorAction Continue 2>$null }
+        }
+        $R = Invoke-OmzigBreakGlassPoll -Now $script:Now
+        $R.Checked | Should -Be 0
+        $R.Errors.Count | Should -Be 1
+    }
+
+    It 'reports a GDAP role that cannot read sign-in logs as access denied, not as a transient error' {
+        Mock -ModuleName Omzig New-GraphGetRequest { throw 'User is not in the allowed roles' }
+        $R = Invoke-OmzigBreakGlassPoll -Now $script:Now
+        $R.Denied | Should -Contain 'contoso.com'
+        $R.Errors.Count | Should -Be 0
+        ($global:BGT.Written | Where-Object { $_.PartitionKey -eq 'BreakGlass' }).LastResult | Should -Match 'access denied'
     }
 }
 
