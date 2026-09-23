@@ -1,7 +1,8 @@
-function Receive-OmzigSentinelTimer {
+function Invoke-OmzigSentinelTimerRun {
     <#
     .SYNOPSIS
-    Entrypoint for the OmzigSentinelTimer function (every 5 minutes).
+    Body of the OmzigSentinelTimer function (every 5 minutes). The Functions entrypoint
+    is the thin Receive-OmzigSentinelTimer wrapper written in Omzig.psm1 itself.
     .DESCRIPTION
     Overlay-owned timer, deliberately separate from CIPP's CIPPTimer: CIPP's timer
     list (Config/CIPPTimers.json) and its scheduled-task allow-list are upstream
@@ -14,7 +15,7 @@ function Receive-OmzigSentinelTimer {
 
     Kill switch: app setting AzureWebJobs.OmzigSentinelTimer.Disabled=1.
     .FUNCTIONALITY
-    Entrypoint
+    Internal
     #>
     [CmdletBinding()]
     param($Timer)
