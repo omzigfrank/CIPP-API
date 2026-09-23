@@ -17,7 +17,10 @@ function Invoke-OmzigSentinelTimerRun {
     RowKey='GdapExpiry' to OmzigSentinelState. The next 5-minute tick runs it once
     and removes the row. No function keys are needed.
 
-    Kill switch: app setting AzureWebJobs.OmzigSentinelTimer.Disabled=1.
+    Every tick also runs Invoke-OmzigPortalWarmup (portal runspace warm-up, Runbook section 8).
+
+    Kill switch: app setting AzureWebJobs.OmzigSentinelTimer.Disabled=1 (this stops the
+    warm-up too; OMZIG_PORTAL_WARM_CALLS=0 stops only the warm-up).
     .FUNCTIONALITY
     Internal
     #>
@@ -50,5 +53,10 @@ function Invoke-OmzigSentinelTimerRun {
     } catch {
         Write-LogMessage -API 'OmzigSentinel' -message "Break-glass sentinel run failed: $($_.Exception.Message)" -sev 'Error'
         throw
+    } finally {
+        # Portal warm-up rides on this tick because a timer of its own would start its own
+        # server every 5 minutes. It runs after the poll so it can never delay an alert, and
+        # it can never fail the run.
+        try { $null = Invoke-OmzigPortalWarmup } catch { Write-Warning "OmzigPortalWarmup failed: $($_.Exception.Message)" }
     }
 }

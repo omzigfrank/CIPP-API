@@ -229,6 +229,7 @@ Describe 'Invoke-OmzigSentinelTimerRun self-test' {
         $global:BGT = @{ Recorded = $null }
         Mock -ModuleName Omzig Add-CIPPAzDataTableEntity { $global:BGT.Recorded = $Entity }
         Mock -ModuleName Omzig Invoke-OmzigBreakGlassPoll { }
+        Mock -ModuleName Omzig Invoke-OmzigPortalWarmup { }
         Invoke-OmzigSentinelTimerRun -Timer $null
         Should -Invoke -ModuleName Omzig Send-OmzigAlert -Times 1 -ParameterFilter { $Severity -eq 'Test' -and $SkipPsa }
         Should -Invoke -ModuleName Omzig Remove-AzDataTableEntity -Times 1
@@ -333,6 +334,7 @@ Describe 'On-demand GDAP run through the 5-minute tick' {
         Mock -ModuleName Omzig Remove-AzDataTableEntity { }
         Mock -ModuleName Omzig Invoke-OmzigGdapExpiryPoll { }
         Mock -ModuleName Omzig Invoke-OmzigBreakGlassPoll { }
+        Mock -ModuleName Omzig Invoke-OmzigPortalWarmup { }
         Invoke-OmzigSentinelTimerRun -Timer $null
         Should -Invoke -ModuleName Omzig Invoke-OmzigGdapExpiryPoll -Times 1
         Should -Invoke -ModuleName Omzig Remove-AzDataTableEntity -Times 1
