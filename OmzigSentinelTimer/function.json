@@ -1,0 +1,12 @@
+{
+  "scriptFile": "../Modules/Omzig/Omzig.psm1",
+  "entryPoint": "Receive-OmzigSentinelTimer",
+  "bindings": [
+    {
+      "name": "Timer",
+      "schedule": "0 */5 * * * *",
+      "direction": "in",
+      "type": "timerTrigger"
+    }
+  ]
+}

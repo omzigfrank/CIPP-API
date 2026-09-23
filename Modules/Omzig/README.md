@@ -26,6 +26,16 @@ Upstream touchpoints are carefully scoped:
 | `Public/Psa/Autotask/*` | Autotask REST client: zone discovery, retries, integration-user probe | Appendix A |
 | `Public/Rmm/*` | Datto RMM v2 client, platform pinned to Vidal | §17 item 4, Appendix B |
 | `Public/Sentinel/Invoke-OmzigBreakGlassSentinel.ps1` | P1 chain for break-glass sign-ins outside incident windows | §7.5, §17 item 12 |
+| `Public/Sentinel/Invoke-OmzigBreakGlassPoll.ps1` | Scheduled poller: bg01/bg02 sign-ins from every tenant, dedupe, incident windows | §7.5 |
+| `Public/Entrypoints/Receive-OmzigSentinelTimer.ps1` | Entrypoint for the overlay-owned `OmzigSentinelTimer` function (every 5 min) + self-test hook | §7.5 |
+| `Public/Alerts/Send-OmzigAlert.ps1` | One alert → Logbook, Teams card, email, P1 PSA ticket; each channel best-effort | §7.5 |
+| `Public/Alerts/New-OmzigTeamsCard.ps1` | Adaptive Card payload for Teams Workflows webhooks (the `{ text }` connector format is retired) | §7.5 |
+| `Private/Get-OmzigTeamsWebhook.ps1` | Resolves the webhook from `OMZIG_TEAMS_WEBHOOK` or Key Vault `teams-alert-webhook` | §7.5 |
+
+`OmzigSentinelTimer/function.json` at the repo root is the overlay's own timer function.
+It exists because CIPP's timer list (`Config/CIPPTimers.json`) and its scheduled-task
+module allow-list are upstream files: registering the sentinel in either would be a
+patch that conflicts on every sync. A new function folder is pure overlay.
 | `Public/Sentinel/Invoke-OmzigGdapExpirySentinel.ps1` | 60/30/7-day GDAP expiry + role drift findings | §7.6 |
 | `Public/Pricing/*` | AIRA/AIDF/AID/MAIO floors, 70% margin gate, Frank-signed override tokens | §3 |
 | `Public/Tenants/*` | `omzig_tenants` record CRUD — **baa defaults to true** | §14, §17 item 11 |

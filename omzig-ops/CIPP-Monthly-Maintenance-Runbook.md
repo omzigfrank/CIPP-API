@@ -84,7 +84,7 @@ is a single membership change.
 | `CIPP-Azure-Operators` | Courtney, Eric, Tony | Reader on RG `CIPP` | secret `get`, `list` | No |
 | `CIPP-Azure-Admins` | Frank, Courtney | Contributor on RG `CIPP` | secret `get`, `list`, `set` | Yes |
 
-Operators can run every one of the 16 checks, including the live token test.
+Operators can run every one of the 17 checks, including the live token test.
 They cannot change or delete anything — rotation and credential deletion need
 the admins group.
 
@@ -546,6 +546,45 @@ Things that were tried and must not be repeated:
   quota also has two layers (regional `Total VMs`, then per-SKU); the error names the one
   that blocked you.
 
+### Break-glass alerting (live since 2026-09-23)
+
+Every 5 minutes, the overlay's own `OmzigSentinelTimer` function reads the sign-in logs
+of every client tenant, plus Omzig's partner tenant, for the emergency accounts
+`bg01@<initial domain>` and `bg02@<initial domain>`. Any sign-in, **including a failed
+attempt**, outside a declared incident window raises a P1:
+
+| Channel | Where | Needs |
+| --- | --- | --- |
+| Logbook | CIPP → Logbook, API `OmzigAlert`, severity Critical | always on |
+| Team chat | Adaptive Card in the ops group chat | Key Vault secret `teams-alert-webhook` (a Teams Workflows webhook URL) |
+| Email | security@omzig.it (override with `OMZIG_ALERT_EMAIL`), sent by CIPP's own mailer | CIPP notifications working |
+| PSA ticket | Autotask P1 | Autotask configured; skipped otherwise |
+
+Expect the alert **5-10 minutes** after the sign-in: Microsoft writes sign-in logs a few
+minutes late. Each sign-in alerts once (table `OmzigBreakGlassSeen`), however often it is read.
+
+**Planned use, so nobody gets paged.** Declare an incident window first, in the tenant's
+default domain:
+
+```powershell
+# from any machine with the CIPP storage connection (or ask Claude to do it)
+Add-AzDataTableEntity -Context (New-AzDataTableContext -ConnectionString $conn -TableName OmzigIncidentWindows) -Entity @{
+  PartitionKey = 'contoso.com'; RowKey = [guid]::NewGuid().ToString()
+  Start = '2026-10-01T14:00:00Z'; End = '2026-10-01T16:00:00Z'; Reason = 'Autotask ticket 12345' }
+```
+
+**Prove the alert path works without touching a break-glass account.** Add a row
+`PartitionKey=SelfTest, RowKey=Pending, RequestedBy=<you>` to the `OmzigSentinelState`
+table. Within 5 minutes a clearly labelled TEST alert goes to the Logbook, the chat and
+email; the row is removed; the per-channel result lands in `SelfTest/LastResult`.
+
+**Blind spots are reported, not hidden.** Sign-in logs need Entra ID P1 or higher in the
+customer tenant, and a GDAP role that can read them. Health check 17 lists the tenants the
+sentinel cannot see; `OmzigSentinelState` holds each tenant's `LastResult`.
+
+**Kill switch:** app setting `AzureWebJobs.OmzigSentinelTimer.Disabled=1` on
+`cippwemix-flex`. Health check 17 then goes CRITICAL, deliberately.
+
 ### Known, harmless quirks since the Flex move
 
 Found in post-cutover QC on 2026-09-22; none affects CIPP's work.
@@ -646,6 +685,7 @@ brand colors are AA rather than AAA, and the supplied circle icon's ground is
 
 | Date | Who | What |
 | --- | --- | --- |
+| 2026-09-23 | Frank + Claude | **Break-glass alerting made live.** The §7.5 sentinel existed but nothing ever ran it, so no break-glass sign-in alerted anyone; its Teams post also used the retired `{ text }` connector format, and the promised email leg was never written. Added the scheduled poller (every 5 min, all tenants + partner tenant, dedupe, incident windows, P1-licence and GDAP blind spots reported), `Send-OmzigAlert` (Logbook, Adaptive Card, email, P1 PSA), a self-test hook and health check 17. 16 new Pester tests; all 134 pass, and four deliberately broken builds each failed the intended test. Health-check workflow now posts every run to the ops chat and no longer files a monthly issue for the two checks its read-only identity cannot perform. Deleted the unused dev stack `rg-omzig-cipp-dev` (all 10 resources; its Cosmos DB held 0 bytes; the vault is soft-deleted until 2026-12-22). Issues enabled on `omzigfrank/CIPP` with the `upstream-sync` label. |
 | 2026-09-22 | Frank + Claude | **Backend moved to Flex Consumption.** `cippwemix-flex` (Linux, 4 GB / 2 cores, 1 always-ready HTTP instance) now serves the portal and runs all background work; `cippwemix` and `cippwemix-proc` are Stopped rollback targets. Built next to production with no credentials and its own storage, load-tested (30 simultaneous requests all under 0.18s; the old app failed 7 of 36 with HTTP 500 under a burst of 12), then cut over. **The first cutover was rolled back** after ~20 minutes: CIPP cannot create its Version row for a new app name (`Update-AzDataTableEntity`), so every start wiped the job hub and no orchestration completed. Seeded the row, proved it on test storage, and cut over again at 23:36Z (site API unlinked for 13s); the 23:45Z cycle ran orchestrations and activities with zero errors. Also found: **`cippwemix-proc` had been running 10.6.1 since 2026-07-14** while the API ran 10.10.3, because no workflow deployed it. The single app removes that failure mode. Pipeline: new `deploy-flex` job with OIDC identity `CIPP-Deploy-GitHub-Flex` (no stored secret). Health check gained checks 14-16 (deployed version, background work actually executing, version-loop detector) and a retired-apps check; the rotation script now restarts only running apps. Flex had been created without HTTPS-only; fixed in QC. **Frontend 10.8.5 → 10.10.3** (PR #41, conflicted since 2026-08-21; issue #68 flagged it 2026-09-01 and it sat unactioned): resolved 9 conflicts from upstream's `.js`→`.jsx` rename, fixed four overlay pages broken by it, branded the sign-in screen. Reverted `PSWorkerInProcConcurrencyUpperBound=4` on Consumption (§8). Quota: B1/B2/S1/P0v3/P1v3/EP1/EP2 all creatable in East US 2 from 21:17Z. **Open:** issues are disabled on `omzigfrank/CIPP`; `omzigfrank` is the only collaborator on CIPP-API, so health issues notify nobody else; the dev stack's backend was last deployed 2026-07-11. |
 | 2026-08-12 | Frank + Claude | **Rebrand:** applied omzig.ai brand sheet v1 across the frontend (86 files) and swept the retired mark from the API overlay (28 files). Retired the `#3088C8` palette and the all-caps macron mark; Space Grotesk + Calibri; live-text wordmark; icons regenerated. Fixed three contrast defects found by measuring: white-on-Electric primary labels, a focus ring that would have failed on white, and footer opacity that had one line at 2.95:1 (below AA). Verified with a real Node 22.22.0 production build (exit 0, 1244-file export, retired mark absent from all built output). Frontend `7fdf9a10`, API `9baec3911`. See §10. |
 | 2026-08-12 | Frank + Claude | **Outage fixed:** rotated the expired CIPP-SAM secret (`AADSTS7000222`, expired 2026-07-22), verified end-to-end. **Upgraded 10.7.5/10.7.3 → 10.8.3** on both forks and both Azure targets; resolved all 6 sync conflicts (§7); both deploy Actions succeeded; post-upgrade health check all green. **Credential cleanup:** deleted 23 unused CIPP-SAM secrets (22 `CIPPInstall` + 1 expired), keeping the in-use secret and `CIPP-SAM-Secret` as a spare; re-verified auth after. Enabled HTTPS-only on `cippwemix`. Set `SSOAppSecret` expiry metadata to match CIPP-SSO's real credential (2028-06-15). Added `CIPP_KV_NAME=kv-omzig-cipp-dev` to `func-omzig-cipp-dev`. Registered the scheduled monthly check (1st of month, 09:00 local). Established this runbook, `Invoke-CippHealthCheck.ps1`, `Invoke-CippSecretRotation.ps1`, and the `/cipp` skill. **Found still open:** the backend `Omzig Upstream Sync` workflow has `TARGET_BRANCH: main` but the repo's default branch is `master`, so it has failed every run since ≥2026-07-13. |

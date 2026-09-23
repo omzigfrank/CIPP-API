@@ -46,17 +46,37 @@ jobs:
           $out | Out-File -FilePath findings.json -Encoding utf8
           Write-Host $out
           # Never fail the job on findings — a red X every month trains people to
-          # ignore it. The issue is the signal.
+          # ignore it. The issue and the team-chat post are the signal.
           exit 0
 
+      # This read-only identity cannot read CIPP-SAM credential expiry, so those two
+      # checks WARN on every unattended run. Counted as findings, they filed an issue
+      # every month and would make every chat post look amber. They are split out as
+      # "not checked by automation" so only real findings raise anything.
+      - name: Separate real findings from automation limits
+        id: classify
+        shell: pwsh
+        run: |
+          $f = @()
+          try { $f = @(Get-Content findings.json -Raw | ConvertFrom-Json) } catch {}
+          $limit = { $_.Check -in 'SAM secret', 'SAM certificate' -and $_.Detail -match 'Could not read' }
+          $bad = @($f | Where-Object { $_.Severity -in 'CRITICAL', 'WARN' } | Where-Object { -not (& $limit) })
+          $notChecked = @($f | Where-Object $limit | ForEach-Object Check | Sort-Object -Unique)
+          ConvertTo-Json -InputObject @($bad) -Depth 5 | Out-File actionable.json -Encoding utf8
+          "actionable=$(if ($bad.Count) { 'true' } else { 'false' })" >> $env:GITHUB_OUTPUT
+          "critical=$(@($bad | Where-Object Severity -EQ 'CRITICAL').Count)" >> $env:GITHUB_OUTPUT
+          "warning=$(@($bad | Where-Object Severity -EQ 'WARN').Count)" >> $env:GITHUB_OUTPUT
+          "notchecked=$($notChecked -join ', ')" >> $env:GITHUB_OUTPUT
+
       - name: File an issue when anything needs attention
-        if: steps.check.outputs.exitcode != '0'
+        id: issue
+        if: steps.classify.outputs.actionable == 'true'
         uses: actions/github-script@v7
         with:
           script: |
             const fs = require('fs');
             let findings = [];
-            try { findings = JSON.parse(fs.readFileSync('findings.json', 'utf8')); } catch (e) {}
+            try { findings = JSON.parse(fs.readFileSync('actionable.json', 'utf8')); } catch (e) {}
             if (!Array.isArray(findings)) findings = [findings];
 
             const bad = findings.filter(f => f.Severity === 'CRITICAL' || f.Severity === 'WARN');
@@ -81,13 +101,55 @@ jobs:
               'this workflow is read-only by design.',
             ].join('\n');
 
-            await github.rest.issues.create({
+            const issue = await github.rest.issues.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
               title: `CIPP health check ${stamp} — ${crit.length} critical, ${bad.length - crit.length} warning`,
               body,
               labels: crit.length ? ['cipp-health', 'critical'] : ['cipp-health'],
             });
+            core.setOutput('url', issue.data.html_url);
+
+      # Every run posts, green included: a silent month must mean the check did not
+      # run, never that nobody saw the result. The webhook URL is a credential; it is
+      # read from Key Vault at run time, masked, and never written anywhere.
+      - name: Post the result to the team chat
+        if: always() && steps.classify.outcome == 'success'
+        shell: pwsh
+        env:
+          CRIT: ${{ steps.classify.outputs.critical }}
+          WARNS: ${{ steps.classify.outputs.warning }}
+          NOTCHECKED: ${{ steps.classify.outputs.notchecked }}
+          ISSUE_URL: ${{ steps.issue.outputs.url }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          $Url = az keyvault secret show --vault-name cippwemix --name teams-alert-webhook --query value -o tsv 2>$null
+          if (-not $Url) {
+            Write-Host '::warning::Key Vault secret teams-alert-webhook is not set, so nothing was posted to the team chat.'
+            exit 0
+          }
+          Write-Host "::add-mask::$Url"
+          . ./Modules/Omzig/Public/Alerts/New-OmzigTeamsCard.ps1
+          $Bad = @(); try { $Bad = @(Get-Content actionable.json -Raw | ConvertFrom-Json) } catch {}
+          $Crit = [int]$env:CRIT; $Warn = [int]$env:WARNS
+          $Severity = if ($Crit) { 'Critical' } elseif ($Warn) { 'Warning' } else { 'Good' }
+          $Title = if ($Bad.Count) { "CIPP health check: $Crit critical, $Warn warning" } else { 'CIPP health check: all clear' }
+          $Facts = [ordered]@{}
+          foreach ($b in $Bad | Select-Object -First 8) {
+            $d = [string]$b.Detail; if ($d.Length -gt 220) { $d = $d.Substring(0, 217) + '...' }
+            $Facts["$($b.Severity) · $($b.Check)"] = $d
+          }
+          if ($env:NOTCHECKED) { $Facts['Not checked by automation'] = "$($env:NOTCHECKED) (run the check as a CIPP-Azure-Admins member)" }
+          $Summary = if ($Bad.Count) { 'Needs attention. Details are on the GitHub issue; the runbook says who fixes what.' } else { 'Monthly check ran and found nothing to act on.' }
+          $Link = if ($env:ISSUE_URL) { $env:ISSUE_URL } else { $env:RUN_URL }
+          $Card = New-OmzigTeamsCard -Title $Title -Severity $Severity -Summary $Summary -Facts $Facts `
+            -LinkText $(if ($env:ISSUE_URL) { 'Open the issue' } else { 'Open the run' }) -LinkUrl $Link
+          try {
+            Invoke-RestMethod -Method Post -Uri $Url -ContentType 'application/json' -Body ($Card | ConvertTo-Json -Depth 20 -Compress) | Out-Null
+            Write-Host "Posted '$Title' to the team chat."
+          } catch {
+            Write-Host "::warning::Team chat post failed: $($_.Exception.Message)"
+          }
 
       - name: Keep the findings as an artifact
         if: always()
