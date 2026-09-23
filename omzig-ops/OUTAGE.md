@@ -190,7 +190,12 @@ az functionapp start -g CIPP -n cippwemix-proc
 while the ARM `PUT` above worked first time, which is why this uses ARM.
 
 Order matters in step 4: two apps running background jobs at once means every job
-runs twice. Then run the health check with `-ApiApp cippwemix -ProcessorApp cippwemix-proc -RetiredApps @()`.
+runs twice.
+
+This rollback relies on CIPP's **Offload functions** setting being **ON** (CIPP →
+Settings → Backend/Features). With it on, the old Consumption API keeps its own
+background triggers disabled and leaves the work to `cippwemix-proc`. Flex ignores the
+setting, so nothing tells you it matters until the day you roll back: leave it on. Then run the health check with `-ApiApp cippwemix -ProcessorApp cippwemix-proc -RetiredApps @()`.
 
 ## H. Version loop / background jobs stall
 

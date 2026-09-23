@@ -546,6 +546,21 @@ Things that were tried and must not be repeated:
   quota also has two layers (regional `Total VMs`, then per-SKU); the error names the one
   that blocked you.
 
+### Known, harmless quirks since the Flex move
+
+Found in post-cutover QC on 2026-09-22; none affects CIPP's work.
+
+- **Settings → Backend "Launch" links.** CIPP builds two of them from the app name, so
+  the Key Vault link points at `cippwemix-flex` (the vault is `cippwemix`) and the Static
+  Web App link at `CIPP-SWA-wemix-flex` (it is `cipp-swa-wemix`). CIPP's real vault access
+  uses `CIPP_KV_NAME` and works. Not patched: it is an upstream file, and patching it would
+  conflict on every sync.
+- **Advanced → Authentication → omzig.ai Users shows no users (HTTP 503).** Not a fault:
+  CIPP logs `Endpoint ListCIPPUsers is disabled via feature flag: Super Admin`. That page
+  needs the feature enabled in CIPP's settings.
+- **The first request after every deploy or restart takes 8-13s** while the server loads
+  CIPP; each extra runspace pays ~9s the first time it is used. Warm requests are ~0.1-0.3s.
+
 ### New app name? Seed its Version row
 
 CIPP records its version with `Update-AzDataTableEntity`, which cannot create a row. A
