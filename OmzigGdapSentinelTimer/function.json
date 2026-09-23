@@ -1,0 +1,12 @@
+{
+  "scriptFile": "../Modules/Omzig/Omzig.psm1",
+  "entryPoint": "Receive-OmzigGdapSentinelTimer",
+  "bindings": [
+    {
+      "name": "Timer",
+      "schedule": "0 0 13 * * *",
+      "direction": "in",
+      "type": "timerTrigger"
+    }
+  ]
+}

@@ -84,7 +84,7 @@ is a single membership change.
 | `CIPP-Azure-Operators` | Courtney, Eric, Tony | Reader on RG `CIPP` | secret `get`, `list` | No |
 | `CIPP-Azure-Admins` | Frank, Courtney | Contributor on RG `CIPP` | secret `get`, `list`, `set` | Yes |
 
-Operators can run every one of the 17 checks, including the live token test.
+Operators can run every one of the 18 checks, including the live token test.
 They cannot change or delete anything — rotation and credential deletion need
 the admins group.
 
@@ -584,6 +584,23 @@ sentinel cannot see; `OmzigSentinelState` holds each tenant's `LastResult`.
 
 **Kill switch:** app setting `AzureWebJobs.OmzigSentinelTimer.Disabled=1` on
 `cippwemix-flex`. Health check 17 then goes CRITICAL, deliberately.
+
+### GDAP expiry alerting (live since 2026-09-23)
+
+Daily at 13:00 UTC the `OmzigGdapSentinelTimer` function reads every GDAP relationship and
+alerts, through the same channels as break-glass, when one **without auto-extend** is 60,
+30 or 7 days from lapsing (Warning, Critical, then P1 with a PSA ticket). Each threshold
+alerts once. Auto-extending relationships renew themselves and never alert. The ones that
+lapse are the `PT0S` ones, which includes every relationship holding Global Administrator.
+
+That is how **Wilco Electrical lost its 83-role "Omzig Inc" relationship on 2026-08-21**,
+leaving CIPP on a 9-role fallback without Exchange, Intune, Security, SharePoint or Teams
+administration there. A CIPP invite with the standard 12 roles was created the same day and
+is still `approvalPending`: nobody on the customer side has accepted it.
+
+Run it now instead of waiting for 13:00: add `PartitionKey=RunNow, RowKey=GdapExpiry` to the
+`OmzigSentinelState` table; the next 5-minute break-glass tick runs it once. Kill switch:
+`AzureWebJobs.OmzigGdapSentinelTimer.Disabled=1`. Health check 18 reports its last run.
 
 ### Known, harmless quirks since the Flex move
 

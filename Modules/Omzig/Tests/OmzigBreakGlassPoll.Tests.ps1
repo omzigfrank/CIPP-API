@@ -222,7 +222,8 @@ Describe 'Invoke-OmzigBreakGlassPoll' {
 Describe 'Invoke-OmzigSentinelTimerRun self-test' {
     It 'sends a TEST alert once, clears the request and records the result' {
         Mock -ModuleName Omzig Get-CIPPTable { @{ Context = $tablename } }
-        Mock -ModuleName Omzig Get-CIPPAzDataTableEntity { [pscustomobject]@{ PartitionKey = 'SelfTest'; RowKey = 'Pending'; RequestedBy = 'claude' } }
+        Mock -ModuleName Omzig Get-CIPPAzDataTableEntity { if ($Filter -match 'SelfTest') { [pscustomobject]@{ PartitionKey = 'SelfTest'; RowKey = 'Pending'; RequestedBy = 'claude' } } }
+        Mock -ModuleName Omzig Invoke-OmzigGdapExpiryPoll { }
         Mock -ModuleName Omzig Send-OmzigAlert { [pscustomobject]@{ Logbook = 'sent'; Teams = 'sent'; Email = 'sent to x'; Psa = 'not applicable' } }
         Mock -ModuleName Omzig Remove-AzDataTableEntity { }
         $global:BGT = @{ Recorded = $null }
@@ -254,5 +255,87 @@ Describe 'Functions-host wiring (regression: entrypoint must be written in the s
             $Names | Should -Contain $D.Json.entryPoint
             (Get-Module Omzig).ExportedFunctions.Keys | Should -Contain $D.Json.entryPoint
         }
+    }
+}
+
+Describe 'Invoke-OmzigGdapExpirySentinel auto-extend (§7.6)' {
+    It 'raises no expiry finding for a relationship that auto-extends, but does for PT0S' {
+        $Now = [datetime]'2026-10-01T00:00:00Z'
+        $Rels = @(
+            [pscustomobject]@{ id = 'ax'; displayName = 'Auto'; status = 'active'; endDateTime = $Now.AddDays(5); autoExtendDuration = 'P180D'; customer = @{ displayName = 'Contoso' }; accessDetails = @{ unifiedRoles = @() } }
+            [pscustomobject]@{ id = 'ga'; displayName = 'GA'; status = 'active'; endDateTime = $Now.AddDays(5); autoExtendDuration = 'PT0S'; customer = @{ displayName = 'Wilco' }; accessDetails = @{ unifiedRoles = @() } }
+        )
+        $F = @(Invoke-OmzigGdapExpirySentinel -Relationships $Rels -Now $Now)
+        $F.Count | Should -Be 1
+        $F[0].RelationshipId | Should -Be 'ga'
+        $F[0].Customer | Should -Be 'Wilco'
+    }
+}
+
+Describe 'Invoke-OmzigGdapExpiryPoll' {
+    BeforeEach {
+        $global:BGT = @{ Alerted = @(); Sent = [System.Collections.Generic.List[object]]::new(); Graph = $null; Written = [System.Collections.Generic.List[object]]::new() }
+        $env:TenantID = 'partner-tenant-id'
+        Mock -ModuleName Omzig Get-CIPPTable { @{ Context = $tablename } }
+        Mock -ModuleName Omzig Get-CIPPAzDataTableEntity { if ($Filter -match "RowKey eq '([^']+)'" -and $Matches[1] -in $global:BGT.Alerted) { [pscustomobject]@{ RowKey = $Matches[1] } } }
+        Mock -ModuleName Omzig Add-CIPPAzDataTableEntity { $global:BGT.Written.Add($Entity) }
+        Mock -ModuleName Omzig Send-OmzigAlert { $global:BGT.Sent.Add([pscustomobject]@{ Severity = $Severity; Title = $Title }) }
+        $script:Now = [datetime]'2026-10-01T00:00:00Z'
+        function global:New-Rel([string]$Id, [int]$Days, [string]$Auto = 'PT0S') {
+            [pscustomobject]@{ id = $Id; displayName = "Rel $Id"; status = 'active'; endDateTime = $script:Now.AddDays($Days).ToString('o'); autoExtendDuration = $Auto; customer = @{ displayName = "Cust $Id" }; accessDetails = @{ unifiedRoles = @() } }
+        }
+    }
+    AfterEach { $env:TenantID = $null; Remove-Item function:global:New-Rel -ErrorAction SilentlyContinue }
+
+    It 'reads the partner tenant with -NoAuthCheck and -ErrorAction Stop' {
+        Mock -ModuleName Omzig New-GraphGetRequest { $global:BGT.Graph = "$tenantid|$NoAuthCheck|$($PesterBoundParameters.ErrorAction)"; @() }
+        $null = Invoke-OmzigGdapExpiryPoll -Now $script:Now
+        $global:BGT.Graph | Should -Be 'partner-tenant-id|True|Stop'
+    }
+
+    It 'escalates severity with the threshold: 45 days Warning, 20 Critical, 5 P1' {
+        Mock -ModuleName Omzig New-GraphGetRequest { @((New-Rel 'a' 45), (New-Rel 'b' 20), (New-Rel 'c' 5), (New-Rel 'd' 300)) }
+        $R = Invoke-OmzigGdapExpiryPoll -Now $script:Now
+        $R.Expiring | Should -Be 3
+        $R.Alerted | Should -Be 3
+        ($global:BGT.Sent | Where-Object Title -Match 'Cust a').Severity | Should -Be 'Warning'
+        ($global:BGT.Sent | Where-Object Title -Match 'Cust b').Severity | Should -Be 'Critical'
+        ($global:BGT.Sent | Where-Object Title -Match 'Cust c').Severity | Should -Be 'P1'
+        $R.Soonest | Should -Be 'Cust c: 5 days'
+    }
+
+    It 'alerts once per threshold, not every day' {
+        $global:BGT.Alerted = @('c|7')
+        Mock -ModuleName Omzig New-GraphGetRequest { @(New-Rel 'c' 5) }
+        $R = Invoke-OmzigGdapExpiryPoll -Now $script:Now
+        $R.Expiring | Should -Be 1
+        $R.Alerted | Should -Be 0
+        $global:BGT.Sent.Count | Should -Be 0
+    }
+
+    It 'stays quiet for relationships that auto-extend' {
+        Mock -ModuleName Omzig New-GraphGetRequest { @(New-Rel 'x' 3 'P180D') }
+        (Invoke-OmzigGdapExpiryPoll -Now $script:Now).Alerted | Should -Be 0
+    }
+
+    It 'fails loudly, not "none expiring", when the relationships cannot be read' {
+        Mock -ModuleName Omzig New-GraphGetRequest {
+            if ($PesterBoundParameters.ErrorAction -eq 'Stop') { throw 'refused' } else { Write-Error 'refused' -ErrorAction Continue 2>$null }
+        }
+        { Invoke-OmzigGdapExpiryPoll -Now $script:Now } | Should -Throw
+    }
+}
+
+Describe 'On-demand GDAP run through the 5-minute tick' {
+    It 'runs the GDAP poll once when a RunNow row exists, and removes the row' {
+        Mock -ModuleName Omzig Get-CIPPTable { @{ Context = $tablename } }
+        Mock -ModuleName Omzig Get-CIPPAzDataTableEntity { if ($Filter -match 'RunNow') { [pscustomobject]@{ PartitionKey = 'RunNow'; RowKey = 'GdapExpiry' } } }
+        Mock -ModuleName Omzig Remove-AzDataTableEntity { }
+        Mock -ModuleName Omzig Invoke-OmzigGdapExpiryPoll { }
+        Mock -ModuleName Omzig Invoke-OmzigBreakGlassPoll { }
+        Invoke-OmzigSentinelTimerRun -Timer $null
+        Should -Invoke -ModuleName Omzig Invoke-OmzigGdapExpiryPoll -Times 1
+        Should -Invoke -ModuleName Omzig Remove-AzDataTableEntity -Times 1
+        Should -Invoke -ModuleName Omzig Invoke-OmzigBreakGlassPoll -Times 1
     }
 }
