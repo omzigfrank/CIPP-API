@@ -27,6 +27,7 @@
       17 Break-glass sentinel ran recently, and which tenants it cannot see
       18 GDAP expiry sentinel ran in the last day, and what is about to lapse
       19 Portal warm-up ran in the last 30 minutes and every ping was answered
+      20 Server memory headroom, and the HTTP concurrency cap that bounds it
 
     Since 2026-09-22 the API is a single Flex Consumption app (cippwemix-flex) that also
     runs the background work. The old Consumption apps are retired and must stay Stopped.
@@ -739,6 +740,44 @@ if ($warmRun -and $warmRun.Rows.Count -gt 0 -and [int]$warmRun.Rows[0][0] -gt 0)
 } elseif ($warmRun) {
     Add-Finding WARN 'Portal warm-up' "No portal warm-up on $ApiApp in 30 min (it rides on the 5-minute sentinel tick)." `
         'Check the sentinel is running (check 17) and OMZIG_PORTAL_WARM_CALLS is not 0.'
+}
+
+# ---------------------------------------------------- 20. Server memory headroom
+# Flex ignores PSWorkerInProcConcurrencyUpperBound, so a server keeps one ~205 MB runspace
+# per call it has ever run at once, and never gives them back. The per-instance HTTP
+# concurrency is the only cap: 12 means about 630 MB + 12 x 205 MB = 3.1 GB of the 4 GB
+# instance (runbook §8). Raising it, or a real leak, shows up here before an out-of-memory kill.
+$appId = "/subscriptions/$Subscription/resourceGroups/$ResourceGroup/providers/Microsoft.Web/sites/$ApiApp"
+$scale = Invoke-Az @('rest', '--method', 'GET', '--url', "https://management.azure.com$($appId)?api-version=2024-04-01",
+                     '--query', 'properties.functionAppConfig.scaleAndConcurrency')
+$httpConc = $scale.triggers.http.perInstanceConcurrency
+$memGb = if ($scale.instanceMemoryMB) { [math]::Round($scale.instanceMemoryMB / 1024, 1) } else { 4 }
+$metrics = Invoke-Az @('monitor', 'metrics', 'list', '--resource', $appId, '--metrics', 'MemoryWorkingSet',
+                       '--aggregation', 'Maximum', '--interval', 'PT5M', '--dimension', 'Instance', '--top', '100',
+                       # --end-time is required: with only --start-time the CLI returns the first hour.
+                       '--start-time', (Get-Date).ToUniversalTime().AddHours(-24).ToString('yyyy-MM-ddTHH:mm:ssZ'),
+                       '--end-time', (Get-Date).ToUniversalTime().ToString('yyyy-MM-ddTHH:mm:ssZ'))
+$peakMb = $null
+if ($metrics -and $metrics.value) {
+    # A server's last reading before it shuts down is exactly double the one before it
+    # (2,997 -> 5,994 MB, seen 2026-09-23), so each server's final point is dropped.
+    $peaks = foreach ($ts in $metrics.value[0].timeseries) {
+        $pts = @($ts.data | Where-Object { $_.maximum })
+        if ($pts.Count -gt 1) { $pts[0..($pts.Count - 2)].maximum }
+    }
+    if ($peaks) { $peakMb = [math]::Round((($peaks | Measure-Object -Maximum).Maximum) / 1MB) }
+}
+$memLimitMb = [int]($memGb * 1024)
+if ($httpConc -and [int]$httpConc -gt 12) {
+    Add-Finding WARN 'Server memory' "HTTP per-instance concurrency is $httpConc; each concurrent call can keep a ~205 MB runspace, so a full server needs about $([math]::Round((630 + 205 * [int]$httpConc) / 1024, 1)) GB of $memGb GB." `
+        'Set it back to 12: az functionapp scale config set --trigger-type http --trigger-settings perInstanceConcurrency=12 (runbook §8).'
+} elseif ($null -ne $peakMb -and $peakMb -gt [int]($memLimitMb * 0.85)) {
+    Add-Finding WARN 'Server memory' "A $ApiApp server peaked at $peakMb MB of $memLimitMb MB in the last 24h." `
+        'Look for a request that holds large results in memory, or runspaces beyond the concurrency cap (runbook §8).'
+} elseif ($null -ne $peakMb) {
+    Add-Finding OK 'Server memory' "Peak $peakMb MB of $memLimitMb MB in 24h; HTTP concurrency cap $httpConc."
+} else {
+    Add-Finding INFO 'Server memory' 'Could not read memory metrics.' "Needs Reader on $ApiApp. $(Get-AzErrorSummary)"
 }
 
 # ------------------------------------------------------------------------ Report
