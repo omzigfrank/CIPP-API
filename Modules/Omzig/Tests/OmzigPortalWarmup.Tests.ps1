@@ -114,7 +114,7 @@ Describe 'Invoke-OmzigPortalWarmup' {
 
     It 'pings PublicPing 12 times by default, all in flight together' {
         $script:Server = Start-WarmTestServer -Handlers 12 -DelayMs 400
-        $R = Invoke-OmzigPortalWarmup -BaseUrl $script:Server.Url -InformationAction SilentlyContinue
+        $R = Invoke-OmzigPortalWarmup -BaseUrl $script:Server.Url -MaxRounds 1 -InformationAction SilentlyContinue
         $R.Calls | Should -Be 12
         $R.Ok | Should -Be 12
         $R.Failed | Should -Be 0
@@ -123,10 +123,33 @@ Describe 'Invoke-OmzigPortalWarmup' {
         $R.WallMs | Should -BeLessThan 2400
     }
 
+    It 'repeats a slow round, so a new server is fully warm after one tick' {
+        $script:Server = Start-WarmTestServer -Handlers 9 -DelayMs 300
+        $R = Invoke-OmzigPortalWarmup -BaseUrl $script:Server.Url -Calls 3 -FastMs 100 -MaxRounds 3 -InformationAction SilentlyContinue
+        $R.Rounds | Should -Be 3
+        $R.RoundMs.Count | Should -Be 3
+        $script:Server.Seen.Count | Should -Be 9
+    }
+
+    It 'stops after the first fast round' {
+        $script:Server = Start-WarmTestServer -Handlers 6
+        $R = Invoke-OmzigPortalWarmup -BaseUrl $script:Server.Url -Calls 3 -FastMs 5000 -InformationAction SilentlyContinue
+        $R.Rounds | Should -Be 1
+        Start-Sleep -Milliseconds 200
+        $script:Server.Seen.Count | Should -Be 3
+    }
+
+    It 'does not repeat a round that failed' {
+        $script:Server = Start-WarmTestServer -Handlers 6 -Status 503
+        $R = Invoke-OmzigPortalWarmup -BaseUrl $script:Server.Url -Calls 3 -FastMs 0 -InformationAction SilentlyContinue -WarningAction SilentlyContinue
+        $R.Rounds | Should -Be 1
+        $R.Failed | Should -Be 3
+    }
+
     It 'takes the count from OMZIG_PORTAL_WARM_CALLS' {
         $env:OMZIG_PORTAL_WARM_CALLS = '3'
         $script:Server = Start-WarmTestServer -Handlers 3
-        (Invoke-OmzigPortalWarmup -BaseUrl $script:Server.Url -InformationAction SilentlyContinue).Ok | Should -Be 3
+        (Invoke-OmzigPortalWarmup -BaseUrl $script:Server.Url -MaxRounds 1 -InformationAction SilentlyContinue).Ok | Should -Be 3
     }
 
     It 'is switched off by OMZIG_PORTAL_WARM_CALLS=0 and sends nothing' {

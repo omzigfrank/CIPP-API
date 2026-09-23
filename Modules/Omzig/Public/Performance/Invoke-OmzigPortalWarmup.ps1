@@ -18,6 +18,10 @@ function Invoke-OmzigPortalWarmup {
     dashboard. Runspaces are never discarded, so on a warm server this costs 12 calls of
     about 0.1s each.
 
+    A round only builds about one runspace once a few exist, because fast pings free their
+    runspace for the next one. So a round slower than -FastMs is repeated, up to
+    -MaxRounds, and a new server is fully warm after one tick instead of six.
+
     Target: see Resolve-OmzigPortalUrl. OMZIG_PORTAL_WARM_CALLS overrides -Calls; 0 turns
     this off. Never throws: a failed warm-up only means the next page may be slow.
     .FUNCTIONALITY
@@ -27,7 +31,9 @@ function Invoke-OmzigPortalWarmup {
     param(
         [string]$BaseUrl,
         [int]$Calls = 12,
-        [int]$TimeoutSeconds = 90
+        [int]$TimeoutSeconds = 90,
+        [int]$MaxRounds = 6,
+        [int]$FastMs = 2000
     )
     if (-not $PSBoundParameters.ContainsKey('Calls') -and $env:OMZIG_PORTAL_WARM_CALLS) {
         $Parsed = 0
@@ -44,31 +50,38 @@ function Invoke-OmzigPortalWarmup {
 
     $Client = [System.Net.Http.HttpClient]::new()
     $Client.Timeout = [TimeSpan]::FromSeconds($TimeoutSeconds)
+    $RoundMs = [System.Collections.Generic.List[int]]::new()
     try {
-        $Sw = [System.Diagnostics.Stopwatch]::StartNew()
-        # Start every request before waiting on any: they have to be in flight together.
-        $Tasks = foreach ($i in 1..$Calls) { $Client.GetAsync("${Uri}?omzigwarm=$i") }
-        $Statuses = foreach ($Task in $Tasks) {
-            try {
-                $Response = $Task.GetAwaiter().GetResult()
-                [int]$Response.StatusCode
-                $Response.Dispose()
-            } catch {
-                0
+        do {
+            $Sw = [System.Diagnostics.Stopwatch]::StartNew()
+            # Start every request before waiting on any: they have to be in flight together.
+            $Tasks = foreach ($i in 1..$Calls) { $Client.GetAsync("${Uri}?omzigwarm=$i") }
+            $Statuses = foreach ($Task in $Tasks) {
+                try {
+                    $Response = $Task.GetAwaiter().GetResult()
+                    [int]$Response.StatusCode
+                    $Response.Dispose()
+                } catch {
+                    0
+                }
             }
-        }
-        $Sw.Stop()
+            $Sw.Stop()
+            $RoundMs.Add([int]$Sw.ElapsedMilliseconds)
+            $Ok = @($Statuses | Where-Object { $_ -eq 200 }).Count
+        } while ($Ok -eq $Calls -and $Sw.ElapsedMilliseconds -gt $FastMs -and $RoundMs.Count -lt $MaxRounds)
     } finally {
         $Client.Dispose()
     }
 
-    $Ok = @($Statuses | Where-Object { $_ -eq 200 }).Count
+    # Ok, Failed and WallMs describe the last round, i.e. how warm the server is now.
     $Result = [pscustomobject]@{
-        Target = ([System.Uri]$Uri).Host
-        Calls  = $Calls
-        Ok     = $Ok
-        Failed = $Calls - $Ok
-        WallMs = [int]$Sw.ElapsedMilliseconds
+        Target  = ([System.Uri]$Uri).Host
+        Calls   = $Calls
+        Ok      = $Ok
+        Failed  = $Calls - $Ok
+        WallMs  = $RoundMs[-1]
+        Rounds  = $RoundMs.Count
+        RoundMs = @($RoundMs)
     }
     Write-Information ('OmzigPortalWarmup: ' + ($Result | ConvertTo-Json -Compress))
     if ($Result.Failed) {

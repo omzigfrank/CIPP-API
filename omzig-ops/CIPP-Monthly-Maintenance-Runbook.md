@@ -558,7 +558,9 @@ CIPP's ~9s module load once, the first time it is used.
    overnight) spent up to ~40s building them during someone's first dashboard. Fix: every
    5-minute sentinel tick sends 12 parallel pings through the portal
    (`Public/Performance/Invoke-OmzigPortalWarmup.ps1`), so the runspaces are built before
-   anyone opens a page. Runspaces are never discarded, so on a warm server this is 12 calls
+   anyone opens a page. Once a few exist a round builds only about one more (fast pings free
+   their runspace for the next), so a round slower than 2s is repeated, up to 6 times, and a
+   new server is fully warm after one tick. Runspaces are never discarded, so on a warm server this is 12 calls
    of ~0.1s. Target: `OMZIG_PORTAL_URL` (set to `https://management.omzig.it`), else CIPP's
    stored `Config/InstanceProperties/CIPPURL`; never a `*.azurewebsites.net` host, which is a
    function app and rejects anonymous calls. Check: traces
