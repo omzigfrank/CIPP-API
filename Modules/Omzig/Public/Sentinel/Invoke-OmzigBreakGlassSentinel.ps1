@@ -6,15 +6,16 @@
     window.
 
     .DESCRIPTION
-    Alert chain on trigger: P1 Autotask ticket via the PSA client, Teams
-    message (Ops webhook), email to security@omzig.it, and a persistent
-    portal banner record. Acceptance test: alert within 60 s of a simulated
-    break-glass sign-in.
+    Alert chain on trigger (Send-OmzigAlert): CIPP Logbook critical entry, Teams
+    Adaptive Card, email to security@omzig.it, and a P1 PSA ticket when a PSA is
+    configured. Driven every 5 minutes by Invoke-OmzigBreakGlassPoll from the
+    OmzigSentinelTimer function; sign-in logs themselves land in Graph a few
+    minutes after the sign-in, so expect an alert within ~10 minutes.
 
     .PARAMETER SignIns
-    Sign-in events (Graph signIn resource shape: userPrincipalName,
-    createdDateTime, appDisplayName, ipAddress). Supplied by the scheduled
-    poller; injected directly in tests.
+    Sign-in events (Graph signIn resource shape: id, userPrincipalName,
+    createdDateTime, appDisplayName, ipAddress, status). Supplied by the
+    scheduled poller; injected directly in tests.
 
     .PARAMETER IncidentWindows
     Active incident windows: objects with Start/End [datetime] and TenantId.
@@ -45,6 +46,13 @@
             }).Count -gt 0
         if ($InWindow) { continue }
 
+        # A failed attempt is still an alert (someone is trying the account), but
+        # the responder needs to know which it was before anything else.
+        $ErrorCode = $SignIn.status.errorCode
+        $Succeeded = ($null -eq $SignIn.status) -or ([int]$ErrorCode -eq 0)
+        $Outcome = if ($Succeeded) { 'SUCCEEDED' } else { "FAILED (error $ErrorCode$(if ($SignIn.status.failureReason) { ": $($SignIn.status.failureReason)" }))" }
+        $Verb = if ($Succeeded) { 'signed in' } else { 'had a failed sign-in attempt' }
+
         $Alert = [PSCustomObject]@{
             Severity  = 'P1'
             Type      = 'BreakGlassSignIn'
@@ -53,7 +61,9 @@
             At        = $When.ToString('o')
             App       = $SignIn.appDisplayName
             IpAddress = $SignIn.ipAddress
-            Message   = "EMERGENCY-ONLY account $($SignIn.userPrincipalName) authenticated outside a declared incident window."
+            Outcome   = $Outcome
+            SignInId  = $SignIn.id
+            Message   = "EMERGENCY-ONLY account $($SignIn.userPrincipalName) $Verb outside a declared incident window."
         }
         $Alerts.Add($Alert)
 
@@ -61,27 +71,18 @@
             if ($AlertAction) {
                 & $AlertAction $Alert
             } else {
-                # Production chain — each leg is best-effort so one failed
-                # channel never suppresses the others.
-                try {
-                    $Psa = Get-OmzigPsaClient
-                    & $Psa.NewTicket @{
-                        companyID   = 0 # resolved from the omzig_tenants PSA mapping by the caller wrapper
-                        title       = "P1 BREAK-GLASS: $($Alert.Account) signed in outside incident window"
-                        description = ($Alert | ConvertTo-Json)
-                        priority    = 1
-                    } | Out-Null
-                } catch { Write-Warning "Break-glass PSA ticket failed: $_" }
-                try {
-                    if ($env:OMZIG_TEAMS_WEBHOOK) {
-                        Invoke-OmzigRestWithRetry -RequestSplat @{
-                            Uri         = $env:OMZIG_TEAMS_WEBHOOK
-                            Method      = 'POST'
-                            ContentType = 'application/json'
-                            Body        = (@{ text = "🚨 $($Alert.Message) Tenant: $TenantFilter, IP: $($Alert.IpAddress)" } | ConvertTo-Json)
-                        } | Out-Null
-                    }
-                } catch { Write-Warning "Break-glass Teams alert failed: $_" }
+                $Facts = [ordered]@{
+                    Tenant      = $TenantFilter
+                    Account     = $Alert.Account
+                    Outcome     = $Alert.Outcome
+                    'When (UTC)' = $When.ToUniversalTime().ToString('yyyy-MM-dd HH:mm:ss')
+                    App         = $Alert.App
+                    'IP address' = $Alert.IpAddress
+                    'Sign-in ID' = $Alert.SignInId
+                }
+                $Sent = Send-OmzigAlert -Severity 'P1' -Title "Break-glass $Verb - $TenantFilter" -Message $Alert.Message `
+                    -TenantFilter $TenantFilter -Facts $Facts
+                $Alert | Add-Member -NotePropertyName Delivery -NotePropertyValue $Sent -Force
             }
         }
     }

@@ -24,6 +24,7 @@
       14 DEPLOYED version: what the app itself reports at startup, not what the repo says
       15 Background work is actually executing (timers AND orchestrations/activities)
       16 Version-change cleanup loop (CIPP wiping its own job hub on every start)
+      17 Break-glass sentinel ran recently, and which tenants it cannot see
 
     Since 2026-09-22 the API is a single Flex Consumption app (cippwemix-flex) that also
     runs the background work. The old Consumption apps are retired and must stay Stopped.
@@ -652,6 +653,38 @@ try {
     }
 } finally {
     Remove-Item $tmp -ErrorAction SilentlyContinue
+}
+
+# ------------------------------------- 17. Break-glass sentinel is alive, and its blind spots
+# A monitor that stopped running looks exactly like a quiet week. The poller logs one
+# summary line per run; its absence is the finding. Tenants without Entra ID P1 (no
+# sign-in logs) or whose GDAP role cannot read them are not covered - say so.
+$bgRun = Invoke-CippKql @"
+AppTraces
+| where TimeGenerated > ago(2h) and AppRoleName == '$ApiApp' and Message has 'OmzigSentinel break-glass poll:'
+| summarize arg_max(TimeGenerated, Message), runs = count()
+| project runs, lastRun = TimeGenerated, lastLine = Message
+"@
+if ($bgRun -and $bgRun.Rows.Count -gt 0 -and [int]$bgRun.Rows[0][0] -gt 0) {
+    $runs = [int]$bgRun.Rows[0][0]
+    $summary = $null
+    try { $summary = (([string]$bgRun.Rows[0][2]) -replace '^.*?OmzigSentinel break-glass poll:\s*', '') | ConvertFrom-Json } catch {}
+    if ($summary) {
+        Add-Finding OK 'Break-glass' "Sentinel ran $runs times in 2h; last run checked $($summary.Checked) of $($summary.Tenants) tenants, $($summary.Alerts) alert(s)."
+        $blind = @(@($summary.NoSignInLogs) + @($summary.Denied) | Where-Object { $_ })
+        if ($blind.Count -gt 0) {
+            Add-Finding INFO 'Break-glass' ("Not covered (no sign-in logs or no GDAP read access): " + ($blind -join ', ') + '.')
+        }
+        if (@($summary.Errors).Count -gt 0) {
+            Add-Finding WARN 'Break-glass' "Last run had $(@($summary.Errors).Count) tenant error(s): $((@($summary.Errors) | Select-Object -First 3) -join '; ')" `
+                'Transient errors are retried next run; if they persist, check the tenant in CIPP.'
+        }
+    } else {
+        Add-Finding OK 'Break-glass' "Sentinel ran $runs times in 2h."
+    }
+} elseif ($bgRun) {
+    Add-Finding CRITICAL 'Break-glass' "The break-glass sentinel has not run on $ApiApp in 2h (it runs every 5 minutes)." `
+        'Check AzureWebJobs.OmzigSentinelTimer.Disabled is not set, then look for OmzigSentinel errors in the Logbook.'
 }
 
 # ------------------------------------------------------------------------ Report
