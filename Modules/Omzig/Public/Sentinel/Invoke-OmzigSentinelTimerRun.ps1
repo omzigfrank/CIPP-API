@@ -13,6 +13,10 @@ function Invoke-OmzigSentinelTimerRun {
     down every channel, removes the row, and records the per-channel result in
     PartitionKey='SelfTest', RowKey='LastResult'. No break-glass account is used.
 
+    Run the daily GDAP expiry check now: add a row PartitionKey='RunNow',
+    RowKey='GdapExpiry' to OmzigSentinelState. The next 5-minute tick runs it once
+    and removes the row. No function keys are needed.
+
     Kill switch: app setting AzureWebJobs.OmzigSentinelTimer.Disabled=1.
     .FUNCTIONALITY
     Internal
@@ -34,6 +38,12 @@ function Invoke-OmzigSentinelTimerRun {
                 At = [datetime]::UtcNow.ToString('o'); Result = ($Delivery | ConvertTo-Json -Compress)
             }
             Write-Information ('OmzigSentinel self-test: ' + ($Delivery | ConvertTo-Json -Compress))
+        }
+
+        $RunNow = Get-CIPPAzDataTableEntity @StateTable -Filter "PartitionKey eq 'RunNow' and RowKey eq 'GdapExpiry'"
+        if ($RunNow) {
+            Remove-AzDataTableEntity @StateTable -Entity $RunNow | Out-Null
+            try { $null = Invoke-OmzigGdapExpiryPoll } catch { Write-LogMessage -API 'OmzigSentinel' -message "On-demand GDAP expiry run failed: $($_.Exception.Message)" -sev 'Error' }
         }
 
         $null = Invoke-OmzigBreakGlassPoll

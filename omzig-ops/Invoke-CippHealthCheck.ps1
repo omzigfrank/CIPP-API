@@ -25,6 +25,7 @@
       15 Background work is actually executing (timers AND orchestrations/activities)
       16 Version-change cleanup loop (CIPP wiping its own job hub on every start)
       17 Break-glass sentinel ran recently, and which tenants it cannot see
+      18 GDAP expiry sentinel ran in the last day, and what is about to lapse
 
     Since 2026-09-22 the API is a single Flex Consumption app (cippwemix-flex) that also
     runs the background work. The old Consumption apps are retired and must stay Stopped.
@@ -685,6 +686,31 @@ if ($bgRun -and $bgRun.Rows.Count -gt 0 -and [int]$bgRun.Rows[0][0] -gt 0) {
 } elseif ($bgRun) {
     Add-Finding CRITICAL 'Break-glass' "The break-glass sentinel has not run on $ApiApp in 2h (it runs every 5 minutes)." `
         'Check AzureWebJobs.OmzigSentinelTimer.Disabled is not set, then look for OmzigSentinel errors in the Logbook.'
+}
+
+# ------------------------------------------ 18. GDAP expiry sentinel ran, and what is lapsing
+# Relationships holding Global Admin cannot auto-extend and lapse on a fixed date; Wilco's
+# did on 2026-08-21 unnoticed. The sentinel runs daily at 13:00 UTC and logs one line.
+$gdapRun = Invoke-CippKql @"
+AppTraces
+| where TimeGenerated > ago(26h) and AppRoleName == '$ApiApp' and Message has 'OmzigSentinel GDAP expiry poll:'
+| summarize arg_max(TimeGenerated, Message), runs = count()
+| project runs, lastRun = TimeGenerated, lastLine = Message
+"@
+if ($gdapRun -and $gdapRun.Rows.Count -gt 0 -and [int]$gdapRun.Rows[0][0] -gt 0) {
+    $g = $null
+    try { $g = (([string]$gdapRun.Rows[0][2]) -replace '^.*?OmzigSentinel GDAP expiry poll:\s*', '') | ConvertFrom-Json } catch {}
+    if ($g -and [int]$g.Expiring -gt 0) {
+        Add-Finding WARN 'GDAP expiry' "$($g.Expiring) GDAP relationship(s) without auto-extend lapse within 60 days; soonest $($g.Soonest)." `
+            'Create the replacement in CIPP (Tenant Administration > GDAP) and have the customer accept it before the end date.'
+    } elseif ($g) {
+        Add-Finding OK 'GDAP expiry' "Sentinel ran; $($g.Active) active relationship(s), none without auto-extend lapsing within 60 days."
+    } else {
+        Add-Finding OK 'GDAP expiry' 'Sentinel ran in the last day.'
+    }
+} elseif ($gdapRun) {
+    Add-Finding WARN 'GDAP expiry' "The GDAP expiry sentinel has not run on $ApiApp in 26h (it runs daily at 13:00 UTC)." `
+        'Check AzureWebJobs.OmzigGdapSentinelTimer.Disabled is not set; to run it now add RunNow/GdapExpiry to OmzigSentinelState.'
 }
 
 # ------------------------------------------------------------------------ Report
