@@ -93,9 +93,33 @@ function Get-CIPPAuthentication {
                 }
             }
 
-            if (-not $env:SAMCertificate) {
-                # First run on this instance: provision the certificate now.
+            if (-not $env:SAMCertificate -and $env:SAMCertProvisionAttempted -ne 'true') {
+                # Another worker may have just written the cert — re-read before minting.
+                if ($IsDevMode) {
+                    $Table = Get-CIPPTable -tablename 'DevSecrets'
+                    $Secret = Get-CIPPAzDataTableEntity @Table -Filter "PartitionKey eq 'Secret' and RowKey eq 'Secret'"
+                    if ($Secret.SAMCertificate) {
+                        $env:SAMCertificate = $Secret.SAMCertificate
+                    }
+                } else {
+                    try {
+                        $SAMCertificateRetry = Get-CippKeyVaultSecret -VaultName $keyvaultname -Name 'SAMCertificate' -AsPlainText -ErrorAction Stop
+                        if ($SAMCertificateRetry) {
+                            $env:SAMCertificate = $SAMCertificateRetry
+                        }
+                    } catch {
+                        Write-Information "SAM certificate still not found on re-read: $($_.Exception.Message)"
+                    }
+                }
+            }
+
+            if (-not $env:SAMCertificate -and $env:SAMCertProvisionAttempted -ne 'true') {
+                # First run on this instance: provision the certificate now, at most once per
+                # process. The guard also breaks a recursion loop: Update-CIPPSAMCertificate
+                # calls Get-GraphToken, which re-enters this function when the AppCache
+                # ApplicationId does not match the environment.
                 # Set-CIPPSAMCertificate refreshes $env:SAMCertificate on success.
+                $env:SAMCertProvisionAttempted = 'true'
                 Write-Information 'No SAM certificate found, provisioning one now'
                 $CertResult = Update-CIPPSAMCertificate -ErrorAction Stop
                 Write-LogMessage -message "Provisioned SAM certificate during authentication load. Thumbprint: $($CertResult.Thumbprint), storage mode: $($CertResult.StorageMode)" -Sev 'Info' -API 'CIPP Authentication'
