@@ -84,7 +84,7 @@ is a single membership change.
 | `CIPP-Azure-Operators` | Courtney, Eric, Tony | Reader on RG `CIPP` | secret `get`, `list` | No |
 | `CIPP-Azure-Admins` | Frank, Courtney | Contributor on RG `CIPP` | secret `get`, `list`, `set` | Yes |
 
-Operators can run every one of the 20 checks, including the live token test.
+Operators can run every one of the 21 checks, including the live token test.
 They cannot change or delete anything — rotation and credential deletion need
 the admins group.
 
@@ -431,6 +431,27 @@ files of `Modules/MicrosoftTeams/7.4.0`, which upstream deleted, were still depl
 11.0.2 merge took upstream's versions and removed the module. After that merge the fork
 equals upstream except for the overlay: 80 added files and 3 patched upstream files
 (`profile.ps1`, `cspell.json`, `PR_Branch_Check.yml`).
+
+### Upstream is retiring this deployment model (owner decision, open since 2026-10-06)
+
+From 11.0, every Function App instance shows a banner: *"This CIPP instance is running on the
+legacy Function App infrastructure, which will soon stop receiving updates."* Upstream's new
+self-hosted model ("CIPPNG") is one Linux container Web App per instance. Their
+[migration guide](https://docs.cipp.app/setup/maintaining-cipp/migrating-to-the-new-infrastructure)
+uses `Invoke-CippMigration.ps1`, which keeps the storage account and Key Vault but **deletes**
+the Function Apps, App Service Plan, Application Insights, the Static Web App and every file
+share, then deploys upstream's stock image. It needs Owner on the resource group and SSO
+migrated first.
+
+**Do not run upstream's script as is.** It would replace our forks with stock CIPP, so the
+whole omzig.ai overlay (Modules/Omzig, the sentinels, the Update Center, the branding) would
+disappear, and the Flex tuning in §8 would no longer apply. Moving means building our own
+container image from both forks and changing both deploy workflows; plan it as a project.
+
+Until then, updates keep flowing only while upstream keeps syncing the `KelvinTegelaar`
+mirrors. Health check 21 compares the mirror with the `CyberDrain/CIPP` monorepo every week
+and warns when the monorepo has shipped a version the mirror hasn't picked up for 3 days.
+That warning means this deployment has stopped getting updates.
 
 **To roll back an update, do not revert the merge.** Redeploy the previous commit instead
 (`gh workflow run master_cippd47d2.yml --ref <sha>` from a branch at that sha), or reset
@@ -795,6 +816,7 @@ brand colors are AA rather than AAA, and the supplied circle icon's ground is
 
 | Date | Who | What |
 | --- | --- | --- |
+| 2026-10-06 | Frank + Claude | **Upgraded both sides 10.10.3 → 11.0.2; found why updates stopped silently.** pull[bot]'s sync PRs had been conflicted since 2026-09-25/27 (1 API file, 3 rebranded components + `yarn.lock`), the sync workflow's conflict alert targeted the fork *parent* (`gh` without `--repo`), and the Update Center read "stable" from GitHub Releases, which upstream stopped publishing on the mirrors after FE v10.7.0 / API 10.9.1, so it said "Up to date". Also found the 2026-07-13 merge-revert hole (§7): upstream's SAM-cert loop guard and KV 404 fix were missing and 125 deleted Teams-module files were still deployed. API PR #85 and frontend PR #43 merged and deployed (API 20:19Z, portal 20:28Z); one version-change cleanup, no loop, zero failed requests after. Update Center now reads upstream's version files; every `gh` write passes `--repo`; health check weekly and gains check 21; upstream's `red-stone` SWA workflow (new `main` trigger, upstream's token) disabled in the fork. 177 Pester tests pass; portal built on Node 22.22.0. **Open:** upstream is retiring Function App deployments (see §7, owner decision); a portal server held ~3.9 GB on 2026-10-05, above the ~3.1 GB the concurrency cap should allow (check 20). |
 | 2026-09-23 | Frank + Claude | **Slow first page load fixed.** Performance check against the old apps: portal calls p50 9.3s to 0.41s, calls over 30s 29% to 0%, dashboard ~60s to ~13s, zero failed requests. The remaining slowness was the first page after a quiet spell (3-7s, up to ~19s after a recycle): .NET thread-pool starvation, reproduced with 10 parallel `PublicPing` calls (5.3s after idle, 0.35s warm). The overlay now raises the worker's thread-pool minimum to 32 at start-up (§8): the same test on a warm server went 5.3s to 0.46s. Second cause, found while verifying: Flex ignores `PSWorkerInProcConcurrencyUpperBound` (the worker starts before app settings load and gets the host default of 1000), so a fresh server built up to ~11 runspaces one at a time (~3.5s each) during the first dashboard; the 5-minute sentinel tick now warms 12 through the portal (§8). 24 new Pester tests; all 168 pass, and five deliberately broken builds each failed the intended tests. Also found each runspace costs ~205 MB and is never freed, so the HTTP concurrency cap (16, about 3.9 GB worst case on a 4 GB server) was the only thing between a busy burst and an out-of-memory kill; lowered to 12 (3.1 GB) and added health check 20. |
 | 2026-09-23 | Frank + Claude | **Break-glass alerting made live.** The §7.5 sentinel existed but nothing ever ran it, so no break-glass sign-in alerted anyone; its Teams post also used the retired `{ text }` connector format, and the promised email leg was never written. Added the scheduled poller (every 5 min, all tenants + partner tenant, dedupe, incident windows, P1-licence and GDAP blind spots reported), `Send-OmzigAlert` (Logbook, Adaptive Card, email, P1 PSA), a self-test hook and health check 17. 16 new Pester tests; all 134 pass, and four deliberately broken builds each failed the intended test. Health-check workflow now posts every run to the ops chat and no longer files a monthly issue for the two checks its read-only identity cannot perform. Deleted the unused dev stack `rg-omzig-cipp-dev` (all 10 resources; its Cosmos DB held 0 bytes; the vault is soft-deleted until 2026-12-22). Issues enabled on `omzigfrank/CIPP` with the `upstream-sync` label. |
 | 2026-09-22 | Frank + Claude | **Backend moved to Flex Consumption.** `cippwemix-flex` (Linux, 4 GB / 2 cores, 1 always-ready HTTP instance) now serves the portal and runs all background work; `cippwemix` and `cippwemix-proc` are Stopped rollback targets. Built next to production with no credentials and its own storage, load-tested (30 simultaneous requests all under 0.18s; the old app failed 7 of 36 with HTTP 500 under a burst of 12), then cut over. **The first cutover was rolled back** after ~20 minutes: CIPP cannot create its Version row for a new app name (`Update-AzDataTableEntity`), so every start wiped the job hub and no orchestration completed. Seeded the row, proved it on test storage, and cut over again at 23:36Z (site API unlinked for 13s); the 23:45Z cycle ran orchestrations and activities with zero errors. Also found: **`cippwemix-proc` had been running 10.6.1 since 2026-07-14** while the API ran 10.10.3, because no workflow deployed it. The single app removes that failure mode. Pipeline: new `deploy-flex` job with OIDC identity `CIPP-Deploy-GitHub-Flex` (no stored secret). Health check gained checks 14-16 (deployed version, background work actually executing, version-loop detector) and a retired-apps check; the rotation script now restarts only running apps. Flex had been created without HTTPS-only; fixed in QC. **Frontend 10.8.5 → 10.10.3** (PR #41, conflicted since 2026-08-21; issue #68 flagged it 2026-09-01 and it sat unactioned): resolved 9 conflicts from upstream's `.js`→`.jsx` rename, fixed four overlay pages broken by it, branded the sign-in screen. Reverted `PSWorkerInProcConcurrencyUpperBound=4` on Consumption (§8). Quota: B1/B2/S1/P0v3/P1v3/EP1/EP2 all creatable in East US 2 from 21:17Z. **Open:** issues are disabled on `omzigfrank/CIPP`; `omzigfrank` is the only collaborator on CIPP-API, so health issues notify nobody else; the dev stack's backend was last deployed 2026-07-11. |

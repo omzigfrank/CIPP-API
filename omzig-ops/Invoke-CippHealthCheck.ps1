@@ -28,6 +28,7 @@
       18 GDAP expiry sentinel ran in the last day, and what is about to lapse
       19 Portal warm-up ran in the last 30 minutes and every ping was answered
       20 Server memory headroom, and the HTTP concurrency cap that bounds it
+      21 Upstream mirrors still track the CyberDrain/CIPP monorepo (the Function App update path)
 
     Since 2026-09-22 the API is a single Flex Consumption app (cippwemix-flex) that also
     runs the background work. The old Consumption apps are retired and must stay Stopped.
@@ -453,6 +454,31 @@ if ($SkipGitHub) {
             Add-Finding WARN 'Version' "$($pair.Name) is on $($pair.Have); upstream is $($pair.Want)." `
                 'Merge the upstream-sync PR (see next finding), then let the deploy Action run.'
         }
+    }
+
+    # ------------------------------------------ 21. Upstream mirrors still track the monorepo
+    # Since 11.0 CIPP is developed in the CyberDrain/CIPP monorepo. The KelvinTegelaar repos our
+    # forks merge are bot-synced mirrors of it, and 11.0 shows every Function App instance a
+    # "legacy infrastructure ... will soon stop receiving updates" banner. When the mirrors stop,
+    # checks 8 and 9 would keep reporting "current" against a frozen mirror, so compare the
+    # mirror with the monorepo directly.
+    $monoLatest = Get-GitHubText 'https://raw.githubusercontent.com/CyberDrain/CIPP/main/backend/version_latest.txt'
+    $parsedMono = $null; $parsedMirror = $null
+    if ($monoLatest -and $apiLatest -and [version]::TryParse($monoLatest, [ref]$parsedMono) -and [version]::TryParse($apiLatest, [ref]$parsedMirror)) {
+        if ($parsedMirror -ge $parsedMono) {
+            Add-Finding INFO 'Upstream mirror' "$ApiUpstream mirrors the CyberDrain/CIPP monorepo ($apiLatest). Upstream is retiring Function App deployments; see runbook §7 for the migration decision."
+        } else {
+            $bump = Get-GitHubJson 'https://api.github.com/repos/CyberDrain/CIPP/commits?path=backend/version_latest.txt&per_page=1'
+            $bumpDays = if ($bump) { [int][math]::Floor(([datetime]::UtcNow - ([datetime]$bump[0].commit.committer.date).ToUniversalTime()).TotalDays) } else { -1 }
+            if ($bumpDays -ge 3) {
+                Add-Finding WARN 'Upstream mirror' "CyberDrain/CIPP shipped $monoLatest $bumpDays days ago, but the $ApiUpstream mirror our fork merges is still on $apiLatest. The mirrors may have stopped, which ends updates for this Function App deployment." `
+                    'Check whether upstream has stopped syncing the KelvinTegelaar repos; if so, act on the infrastructure migration in runbook §7.'
+            } else {
+                Add-Finding INFO 'Upstream mirror' "CyberDrain/CIPP is on $monoLatest; the $ApiUpstream mirror ($apiLatest) usually catches up within a day."
+            }
+        }
+    } else {
+        Add-Finding WARN 'Upstream mirror' 'Could not compare the upstream mirror with the CyberDrain/CIPP monorepo.' 'Check GitHub connectivity; the monorepo version file is backend/version_latest.txt on main.'
     }
 
     foreach ($repo in @($ApiFork, $FrontendFork)) {
