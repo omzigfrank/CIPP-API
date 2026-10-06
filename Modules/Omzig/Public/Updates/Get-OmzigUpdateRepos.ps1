@@ -9,6 +9,12 @@ function Get-OmzigUpdateRepos {
     deploy pipelines watch). Overridable via app settings so a rename never
     requires a code change.
 
+    Since 11.0 upstream develops in the CyberDrain/CIPP monorepo and publishes
+    GitHub Releases only there. KelvinTegelaar/CIPP and KelvinTegelaar/CIPP-API
+    are bot-synced mirrors of it, and they are what the forks merge, so the
+    stable version is read from each mirror's version file (UpstreamBranch +
+    VersionFile); ReleaseNotesRepo is only used to link the release notes.
+
     .FUNCTIONALITY
     Internal
     #>
@@ -23,19 +29,26 @@ function Get-OmzigUpdateRepos {
     # the default branch; overridable so a stack tracking a feature branch
     # (e.g. dev before the overlay PRs merge) can still dispatch installs.
     $WorkflowRef = $env:OMZIG_UPDATE_WORKFLOW_REF
+    $ReleaseNotesRepo = if ($env:OMZIG_UPSTREAM_RELEASES_REPO) { $env:OMZIG_UPSTREAM_RELEASES_REPO } else { 'CyberDrain/CIPP' }
 
     [PSCustomObject]@{
         Frontend = [PSCustomObject]@{
             Fork          = "$Owner/CIPP"
-            Upstream      = 'KelvinTegelaar/CIPP'
-            DefaultBranch = $FrontendBranch
-            WorkflowRef   = if ($WorkflowRef) { $WorkflowRef } else { $FrontendBranch }
+            Upstream         = 'KelvinTegelaar/CIPP'
+            UpstreamBranch   = 'main'
+            VersionFile      = 'public/version.json'
+            ReleaseNotesRepo = $ReleaseNotesRepo
+            DefaultBranch    = $FrontendBranch
+            WorkflowRef      = if ($WorkflowRef) { $WorkflowRef } else { $FrontendBranch }
         }
         Api      = [PSCustomObject]@{
             Fork          = "$Owner/CIPP-API"
-            Upstream      = 'KelvinTegelaar/CIPP-API'
-            DefaultBranch = $ApiBranch
-            WorkflowRef   = if ($WorkflowRef) { $WorkflowRef } else { $ApiBranch }
+            Upstream         = 'KelvinTegelaar/CIPP-API'
+            UpstreamBranch   = 'master'
+            VersionFile      = 'version_latest.txt'
+            ReleaseNotesRepo = $ReleaseNotesRepo
+            DefaultBranch    = $ApiBranch
+            WorkflowRef      = if ($WorkflowRef) { $WorkflowRef } else { $ApiBranch }
         }
     }
 }

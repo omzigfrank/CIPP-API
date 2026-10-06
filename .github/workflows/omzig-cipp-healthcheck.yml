@@ -13,7 +13,9 @@ name: Omzig CIPP Health Check
 
 on:
   schedule:
-    - cron: '0 13 1 * *' # 1st of the month, 13:00 UTC (09:00 ET)
+    # Weekly, not monthly: the 2026-10-01 run flagged both conflicted sync PRs,
+    # but a month between posts let the instance sit a major version behind.
+    - cron: '0 13 * * 1' # Mondays 13:00 UTC (09:00 ET)
   workflow_dispatch:
 
 permissions:
@@ -140,7 +142,7 @@ jobs:
             $Facts["$($b.Severity) · $($b.Check)"] = $d
           }
           if ($env:NOTCHECKED) { $Facts['Not checked by automation'] = "$($env:NOTCHECKED) (run the check as a CIPP-Azure-Admins member)" }
-          $Summary = if ($Bad.Count) { 'Needs attention. Details are on the GitHub issue; the runbook says who fixes what.' } else { 'Monthly check ran and found nothing to act on.' }
+          $Summary = if ($Bad.Count) { 'Needs attention. Details are on the GitHub issue; the runbook says who fixes what.' } else { 'Weekly check ran and found nothing to act on.' }
           $Link = if ($env:ISSUE_URL) { $env:ISSUE_URL } else { $env:RUN_URL }
           $Card = New-OmzigTeamsCard -Title $Title -Severity $Severity -Summary $Summary -Facts $Facts `
             -LinkText $(if ($env:ISSUE_URL) { 'Open the issue' } else { 'Open the run' }) -LinkUrl $Link

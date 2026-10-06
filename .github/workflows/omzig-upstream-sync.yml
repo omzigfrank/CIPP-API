@@ -51,11 +51,12 @@ jobs:
 
       - name: Create sync branch and merge
         id: merge
+        env:
+          STRATEGY: ${{ github.event.inputs.strategy || 'merge' }}
         run: |
           SYNC_BRANCH="omzig/upstream-sync-$(date -u +%Y-%m-%d)"
           echo "branch=${SYNC_BRANCH}" >> "$GITHUB_OUTPUT"
           git checkout -b "${SYNC_BRANCH}"
-          STRATEGY="${{ github.event.inputs.strategy || 'merge' }}"
           set +e
           if [ "$STRATEGY" = "rebase" ]; then
             git rebase "upstream/${UPSTREAM_BRANCH}"
@@ -75,15 +76,19 @@ jobs:
         if: steps.merge.outputs.conflicted == 'false'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SYNC_BRANCH: ${{ steps.merge.outputs.branch }}
         run: |
           if git diff --quiet "origin/${TARGET_BRANCH}"; then
             echo 'Already up to date with upstream — nothing to sync.'
             exit 0
           fi
-          git push -u origin "${{ steps.merge.outputs.branch }}"
-          gh pr create \
+          git push -u origin "${SYNC_BRANCH}"
+          # --repo on every gh write: with an 'upstream' remote, gh otherwise
+          # targets the fork parent. Every conflict alert from 2026-09-28 on
+          # failed that way ("KelvinTegelaar/CIPP-API has disabled issues").
+          gh pr create --repo "${GITHUB_REPOSITORY}" \
             --base "${TARGET_BRANCH}" \
-            --head "${{ steps.merge.outputs.branch }}" \
+            --head "${SYNC_BRANCH}" \
             --title "chore: weekly upstream sync from ${UPSTREAM_REPO}" \
             --body "Automated weekly sync from \`${UPSTREAM_REPO}@${UPSTREAM_BRANCH}\` (spec §11.4). Review the overlay touchpoint (profile.ps1) before merging. Merge requires Frank's approval per Governance Non-Negotiable #5."
 
@@ -92,7 +97,7 @@ jobs:
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
-          gh issue create \
+          gh issue create --repo "${GITHUB_REPOSITORY}" \
             --title "Upstream sync conflict — $(date -u +%Y-%m-%d)" \
             --label 'upstream-sync' \
             --body "The weekly sync from \`${UPSTREAM_REPO}@${UPSTREAM_BRANCH}\` hit merge conflicts and needs a manual resolve. Expected conflict surface: the marked omzig.ai overlay touchpoints. Run the sync locally, resolve, and open the PR by hand."

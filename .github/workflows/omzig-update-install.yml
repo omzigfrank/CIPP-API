@@ -1,7 +1,11 @@
 # omzig.ai Update Center — install updates from CIPP's official GitHub.
 #
 # Channels:
-#   stable     -> latest published release tag of KelvinTegelaar/CIPP-API
+#   stable     -> head of the upstream release branch (UPSTREAM_BRANCH), the
+#                 branch CIPP itself ships from. This used to be the latest
+#                 GitHub Release, but upstream stopped publishing Releases here
+#                 after 10.9.1 (they moved to the CyberDrain/CIPP monorepo and
+#                 mirror into this repo), so stable silently stayed on 10.9.1.
 #   prerelease -> latest published prerelease (beta); falls back to dev
 #   dev        -> head of the upstream dev branch (canary)
 #
@@ -41,6 +45,7 @@ permissions:
 
 env:
   UPSTREAM_REPO: KelvinTegelaar/CIPP-API
+  UPSTREAM_BRANCH: master
   TARGET_BRANCH: master
   DEV_BRANCH: dev
   DEPLOY_WORKFLOW: master_cippd47d2.yml
@@ -87,8 +92,8 @@ jobs:
           case "$CHANNEL" in stable|prerelease|dev) ;; *) echo "::error::Unknown channel '$CHANNEL'"; exit 1 ;; esac
           case "$MODE" in install|pr) ;; *) echo "::error::Unknown mode '$MODE'"; exit 1 ;; esac
 
-          # omzig.ai audit #1 (governance): only the STABLE channel — a published
-          # upstream release — may install directly to the deploy branch.
+          # omzig.ai audit #1 (governance): only the STABLE channel — upstream's
+          # release branch — may install directly to the deploy branch.
           # prerelease/dev carry unreviewed upstream code, so they are ALWAYS
           # routed through a review PR and never auto-deployed to production.
           if [ "$CHANNEL" != "stable" ] && [ "$MODE" = "install" ]; then
@@ -109,7 +114,7 @@ jobs:
         run: |
           case "$CHANNEL" in
             stable)
-              REF="$(gh api "repos/${UPSTREAM_REPO}/releases/latest" --jq '.tag_name')"
+              REF="$UPSTREAM_BRANCH"
               ;;
             prerelease)
               REF="$(gh api "repos/${UPSTREAM_REPO}/releases?per_page=30" \
@@ -183,7 +188,9 @@ jobs:
           BRANCH="omzig/update-$CHANNEL-$(date -u +%Y-%m-%d-%H%M)"
           git checkout -b "$BRANCH"
           git push -u origin "$BRANCH"
-          gh pr create \
+          # --repo on every gh write: with an 'upstream' remote, gh otherwise
+          # targets the fork parent, i.e. CIPP's public repository.
+          gh pr create --repo "${GITHUB_REPOSITORY}" \
             --base "${TARGET_BRANCH}" \
             --head "$BRANCH" \
             --title "chore: CIPP update — $REF ($CHANNEL)" \
@@ -196,7 +203,7 @@ jobs:
           REF: ${{ steps.ref.outputs.ref }}
           CHANNEL: ${{ steps.cfg.outputs.channel }}
         run: |
-          gh issue create \
+          gh issue create --repo "${GITHUB_REPOSITORY}" \
             --title "Update install conflict — $REF ($CHANNEL)" \
             --label 'upstream-sync' \
             --body "Installing \`${UPSTREAM_REPO}@$REF\` hit merge conflicts and was aborted — nothing was deployed. Expected conflict surface: the marked omzig.ai overlay touchpoints. Resolve locally and push, or run the weekly sync flow."

@@ -96,8 +96,19 @@ BeforeAll {
         if ($Method -eq 'GET' -and $script:GitHubReadsFail) { throw 'GitHub unreachable' }
         if ($Method -eq 'PATCH' -and $script:GitHubPatchFails) { throw 'Not Found' }
         if ($Path -match 'releases\?') { return $script:ReleasesFixture }
+        if ($Path -match 'releases/tags/') { return $script:NotesFixture }
         if ($Path -match 'branches/dev') { return $script:DevBranchFixture }
         return $null
+    }
+
+    # Stable comes from the upstream version files on raw.githubusercontent.com.
+    function Global:Invoke-CIPPRestMethod {
+        param($Uri)
+        $script:RawCalls.Add($Uri)
+        if ($script:GitHubReadsFail) { throw 'GitHub unreachable' }
+        if ($Uri -match 'version\.json$') { return [PSCustomObject]@{ version = $script:FrontendVersionFixture } }
+        if ($Uri -match 'version_latest\.txt$') { return "$($script:ApiVersionFixture)`n" }
+        throw "unexpected uri $Uri"
     }
 
     function Global:Write-LogMessage {
@@ -115,6 +126,11 @@ BeforeAll {
         [PSCustomObject]@{ tag_name = 'v10.5.8'; name = 'Stable'; prerelease = $false; draft = $false; published_at = '2026-06-20T00:00:00Z'; html_url = 'https://github.com/KelvinTegelaar/CIPP/releases/tag/v10.5.8' }
         [PSCustomObject]@{ tag_name = 'v10.5.7'; name = 'Older'; prerelease = $false; draft = $false; published_at = '2026-06-01T00:00:00Z'; html_url = 'https://example.invalid' }
     )
+    $script:RawCalls = [System.Collections.Generic.List[string]]::new()
+    $script:FrontendVersionFixture = '11.0.2'
+    $script:ApiVersionFixture = '11.0.2'
+    $script:NotesDefault = [PSCustomObject]@{ tag_name = 'v11.0.2'; name = 'v11.0.2 - Hotfix'; published_at = '2026-10-02T18:40:00Z'; html_url = 'https://github.com/CyberDrain/CIPP/releases/tag/v11.0.2' }
+    $script:NotesFixture = $script:NotesDefault
     $script:DevBranchDefault = [PSCustomObject]@{
         commit = [PSCustomObject]@{
             sha    = 'abc1234def'
@@ -127,7 +143,7 @@ BeforeAll {
 }
 
 AfterAll {
-    foreach ($Name in 'Get-CIPPTable', 'Get-CIPPAzDataTableEntity', 'Add-CIPPAzDataTableEntity', 'Invoke-GitHubApiRequest', 'Write-LogMessage', 'Get-CIPPAccessRole', 'New-GraphGetRequest') {
+    foreach ($Name in 'Get-CIPPTable', 'Get-CIPPAzDataTableEntity', 'Add-CIPPAzDataTableEntity', 'Invoke-GitHubApiRequest', 'Invoke-CIPPRestMethod', 'Write-LogMessage', 'Get-CIPPAccessRole', 'New-GraphGetRequest') {
         Remove-Item -Path "function:Global:$Name" -ErrorAction SilentlyContinue
     }
 }
@@ -141,6 +157,15 @@ Describe 'Get-OmzigUpdateRepos' {
         $Repos.Api.Fork | Should -Be 'omzigfrank/CIPP-API'
         $Repos.Api.Upstream | Should -Be 'KelvinTegelaar/CIPP-API'
         $Repos.Api.DefaultBranch | Should -Be 'master'
+    }
+
+    It 'points stable at the mirrors the forks merge, with release notes from the CyberDrain monorepo' {
+        $Repos = Get-OmzigUpdateRepos
+        $Repos.Frontend.UpstreamBranch | Should -Be 'main'
+        $Repos.Frontend.VersionFile | Should -Be 'public/version.json'
+        $Repos.Api.UpstreamBranch | Should -Be 'master'
+        $Repos.Api.VersionFile | Should -Be 'version_latest.txt'
+        $Repos.Api.ReleaseNotesRepo | Should -Be 'CyberDrain/CIPP'
     }
 
     It 'honors the OMZIG_GITHUB_OWNER override' {
@@ -171,13 +196,41 @@ Describe 'Get-OmzigUpdateChannels' {
         $script:GitHubReadsFail = $false
         $script:ReleasesFixture = $script:ReleasesDefault
         $script:DevBranchFixture = $script:DevBranchDefault
+        $script:NotesFixture = $script:NotesDefault
+        $script:FrontendVersionFixture = '11.0.2'
+        $script:ApiVersionFixture = '11.0.2'
         $script:GitHubCalls.Clear()
+        $script:RawCalls.Clear()
     }
 
-    It 'picks the newest published stable release, skipping drafts and prereleases' {
+    It 'reads stable from the upstream version files, not GitHub Releases (which stopped at 10.7.0 / 10.9.1)' {
         $Channels = Get-OmzigUpdateChannels
-        $Channels.Frontend.Stable.Version | Should -Be 'v10.5.8'
+        $Channels.Frontend.Stable.Version | Should -Be '11.0.2'
+        $Channels.Api.Stable.Version | Should -Be '11.0.2'
         $Channels.Frontend.Stable.Prerelease | Should -BeFalse
+        $script:RawCalls | Should -Contain 'https://raw.githubusercontent.com/KelvinTegelaar/CIPP/main/public/version.json'
+        $script:RawCalls | Should -Contain 'https://raw.githubusercontent.com/KelvinTegelaar/CIPP-API/master/version_latest.txt'
+    }
+
+    It 'links the release notes and looks them up once when both sides share a version' {
+        $Channels = Get-OmzigUpdateChannels
+        $Channels.Api.Stable.Url | Should -Be 'https://github.com/CyberDrain/CIPP/releases/tag/v11.0.2'
+        $Channels.Api.Stable.Name | Should -Be 'v11.0.2 - Hotfix'
+        $Channels.Api.Stable.PublishedAt | Should -Be '2026-10-02T18:40:00Z'
+        @($script:GitHubCalls | Where-Object Path -Match 'releases/tags/').Count | Should -Be 1
+    }
+
+    It 'falls back to the version file link when no release notes exist' {
+        $script:NotesFixture = $null
+        $script:ApiVersionFixture = '11.0.3'
+        $Channels = Get-OmzigUpdateChannels
+        $Channels.Api.Stable.Version | Should -Be '11.0.3'
+        $Channels.Api.Stable.Url | Should -Be 'https://github.com/KelvinTegelaar/CIPP-API/blob/master/version_latest.txt'
+    }
+
+    It 'ignores a version file that does not hold a version' {
+        $script:FrontendVersionFixture = '<html>rate limited</html>'
+        (Get-OmzigUpdateChannels).Frontend.Stable | Should -BeNullOrEmpty
     }
 
     It 'exposes the latest prerelease as the beta channel' {
@@ -366,7 +419,7 @@ Describe 'Invoke-ListOmzigUpdateStatus (GET entrypoint)' {
         }
         $Response = Invoke-ListOmzigUpdateStatus -Request $Request -TriggerMetadata @{}
         $Response.StatusCode | Should -Be 200
-        $Response.Body.Channels.Frontend.Stable.Version | Should -Be 'v10.5.8'
+        $Response.Body.Channels.Frontend.Stable.Version | Should -Be '11.0.2'
         $Response.Body.Settings.Channel | Should -Be 'stable'
         $Response.Body.GitHubIntegration | Should -BeTrue
         $Response.Body.Repos.Frontend.Fork | Should -Be 'omzigfrank/CIPP'
