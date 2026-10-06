@@ -396,6 +396,53 @@ curl -s "https://api.github.com/repos/omzigfrank/CIPP-API/actions/runs?per_page=
 Also note the workflow's header comment claims conflicts "should only ever surface in
 profile.ps1" — that is stale. The real conflict surface is any upstream file we patched.
 
+### 2026-10-06 — both sides 10.10.3 → 11.0.2, and why nothing said so
+
+The instance sat on 10.10.3 for eleven days after upstream shipped 11.0.0, while the
+Update Center showed **"Up to date with stable"**. Four separate things lined up:
+
+- **Upstream moved.** Since 11.0, CIPP is developed in the **`CyberDrain/CIPP` monorepo**
+  (`frontend/`, `backend/`), and GitHub Releases are published only there.
+  `KelvinTegelaar/CIPP` and `KelvinTegelaar/CIPP-API` are now bot-synced mirrors of it.
+  They are still what our forks merge, so the sync chain is unchanged. But their own
+  Releases stopped at FE v10.7.0 / API 10.9.1.
+- **The Update Center trusted Releases.** It took "stable" to mean the latest GitHub
+  Release, so it compared 10.10.3 with 10.9.1 and called us ahead. The install workflow
+  did the same, so even a scheduled install would have been a no-op. Both now read the
+  version file on the upstream release branch (`version_latest.txt` on master,
+  `public/version.json` on main), the same source CIPP's own update check uses. Releases are
+  still read, but only to link release notes and for the beta channel.
+- **The conflict alert never fired.** `omzig-upstream-sync.yml` ran `gh issue create`
+  with no `--repo`. In a checkout with an `upstream` remote, `gh` targets the fork's
+  *parent*, i.e. CIPP's public repository. On CIPP-API that failed ("repository has
+  disabled issues"). On the frontend, upstream has issues **on**, and only a missing label
+  stopped our internal alert from being posted publicly. Every `gh` write in our workflows
+  now passes `--repo "${GITHUB_REPOSITORY}"`. Keep it that way.
+- **Monthly was too slow.** Health-check issue #84 flagged both conflicted sync PRs on
+  2026-10-01 and nobody acted. The health check now runs weekly (Mondays 13:00 UTC) and
+  posts every run to the ops chat.
+
+**The July rollback left a hole that every later sync skipped.** The 2026-07-13 canary
+rollback was `git revert -m 1` of a merge (`db90d6ff1`). Git treats the reverted upstream
+commits as already merged, so every sync after it "succeeded" without them. Two results:
+upstream's SAM-certificate provisioning-loop guard and Key Vault 404 fix (`5ae417185`)
+were missing from `Get-CIPPAuthentication.ps1` and `Get-CippKeyVaultSecret.ps1`, and 125
+files of `Modules/MicrosoftTeams/7.4.0`, which upstream deleted, were still deployed. The
+11.0.2 merge took upstream's versions and removed the module. After that merge the fork
+equals upstream except for the overlay: 80 added files and 3 patched upstream files
+(`profile.ps1`, `cspell.json`, `PR_Branch_Check.yml`).
+
+**To roll back an update, do not revert the merge.** Redeploy the previous commit instead
+(`gh workflow run master_cippd47d2.yml --ref <sha>` from a branch at that sha), or reset
+the branch. If a merge revert is unavoidable, revert the revert before the next sync, or
+the next sync silently skips everything it removed. After any sync, this lists every path
+that differs from upstream outside the overlay. Expect exactly four: the three patched files
+above and our deploy workflow `master_cippd47d2.yml`. Anything else is a bug:
+
+```bash
+git diff --name-status upstream/master HEAD | grep -v 'Modules/Omzig\|omzig-ops\|/Omzig/\|omzig-\|docs/omzig\|OmzigSentinelTimer\|OmzigGdapSentinelTimer'
+```
+
 ### 2026-09-22 — frontend 10.8.5 → 10.10.3, 9 conflicts
 
 Upstream renamed most of the frontend from `.js` to `.jsx` between 10.8 and 10.10, so
