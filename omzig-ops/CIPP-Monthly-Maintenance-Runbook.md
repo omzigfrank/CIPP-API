@@ -434,6 +434,8 @@ equals upstream except for the overlay: 80 added files and 3 patched upstream fi
 
 ### Upstream is retiring this deployment model (owner decision, open since 2026-10-06)
 
+**Deadline 1 January 2027; plan: [CIPP-NG-Migration-Plan.md](CIPP-NG-Migration-Plan.md).**
+
 From 11.0, every Function App instance shows a banner: *"This CIPP instance is running on the
 legacy Function App infrastructure, which will soon stop receiving updates."* Upstream's new
 self-hosted model ("CIPPNG") is one Linux container Web App per instance. Their
